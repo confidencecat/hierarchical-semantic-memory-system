@@ -1,53 +1,303 @@
 # 계층적 의미 기억 시스템 (Hierarchical Semantic Memory System)
 
+## 📋 목차
+1. [프로젝트 개요](#1-프로젝트-개요)
+2. [시스템 아키텍처](#2-시스템-아키텍처)
+3. [설치 및 설정](#3-설치-및-설정)
+4. [사용법](#4-사용법)
+5. [핵심 클래스 및 함수](#5-핵심-클래스-및-함수)
+6. [AI 분류 시스템](#6-ai-분류-시스템)
+7. [파일 구조](#7-파일-구조)
+8. [고급 기능](#8-고급-기능)
+
 ## 1. 프로젝트 개요
 
-본 프로젝트는 기존의 선형적 기억 분할 시스템을 **계층적 의미 기억 구조**로 진화시킨 차세대 AI 대화 시스템입니다. 트리 구조를 기반으로 대화 내용을 의미적으로 분류하고 계층화하여, 효율적인 정보 검색과 맥락 인식이 가능한 장기 기억 관리를 구현합니다.
+### 1.1 핵심 개념
+본 프로젝트는 **AI 기반 계층적 의미 기억 시스템**으로, 대화 내용을 의미적으로 분류하여 트리 구조로 관리하는 차세대 대화 AI입니다.
 
-### 1.1 핵심 특징
-- **🌳 계층적 트리 구조**: 주제별 카테고리와 하위 노드로 체계적 분류
-- **⚡ 비동기 병렬 검색**: 다중 API 키를 활용한 고속 정보 검색
-- **🎯 의미적 분류**: AI 기반 자동 주제 추출 및 카테고리 배치
-- **📊 시각적 트리 구조**: 직관적인 기억 구조 시각화
-- **🔧 명령줄 인터페이스**: 다양한 실행 모드와 옵션 지원
-- **🤖 Discord 봇 지원**: Discord에서 실시간 대화 및 기억 관리
-- **⚙️ 모듈화된 구조**: 핵심 로직과 인터페이스 분리
+### 1.2 주요 특징
+- 🌳 **계층적 트리 구조**: 카테고리 → 하위 주제 → 대화 노드
+- 🤖 **AI 기반 분류**: Google Gemini를 활용한 지능적 주제 분류
+- ⚡ **비동기 병렬 처리**: 다중 API 키로 고속 검색 및 분류
+- 🎯 **다중 주제 처리**: 한 대화에서 여러 주제 자동 분리
+- 💬 **Discord 봇 지원**: 실시간 서버별 기억 관리
+- 🐛 **디버그 모드**: AI 분류 과정 실시간 관찰
+- 🔧 **모듈화 설계**: 유지보수 및 확장 용이
 
-## 2. 파일 구조
+### 1.3 문제 해결
+**기존 문제점**: 단순 키워드 기반 분류로 인한 오분류
+- ❌ "SSD 설명" → "배(과일)" 노드 
+- ❌ "인류 역사" → "개(동물)" 노드
 
+**해결 방안**: AI 기반 의미적 분류 시스템
+- ✅ 컨텍스트 이해를 통한 정확한 분류
+- ✅ 다중 주제 대화 자동 분리
+- ✅ Few-shot prompting으로 분류 정확도 향상
+
+## 2. 시스템 아키텍처
+
+### 2.1 전체 구조도
 ```
-hierarchical_semantic_memory_system/
-├── main.py                 # 메인 실행 파일 (명령줄 인터페이스)
-├── hierarchical.py         # 핵심 클래스들 (메모리 관리, AI 호출)
-├── discord.py             # Discord 봇 구현
-├── config.py              # 설정 파일 (API 키, Fine-tuning 데이터)
-├── requirements.txt       # 필요한 Python 패키지
-├── README.md             # 프로젝트 문서
-└── memory/               # 기억 저장소
-    ├── hierarchical_memory.json  # 트리 구조 데이터
-    └── all_memory.json           # 전체 대화 기록
+┌─────────────────────────────────────────────────────────────┐
+│                        User Interface                       │
+├─────────────────┬─────────────────┬─────────────────────────┤
+│   CLI Mode      │   Chat Mode     │    Discord Bot Mode     │
+│  (main.py)      │   (main.py)     │   (hsms_discord.py)     │
+└─────────────────┴─────────────────┴─────────────────────────┘
+                            │
+                    ┌───────▼────────┐
+                    │   MainAI       │
+                    │ (main interface)│
+                    └───────┬────────┘
+                            │
+        ┌───────────────────┼───────────────────┐
+        │                   │                   │
+┌───────▼────────┐ ┌────────▼────────┐ ┌────────▼────────┐
+│  AuxiliaryAI   │ │  MemoryManager  │ │   AIManager     │
+│ (categorization)│ │ (tree structure)│ │ (API handling)  │
+└────────────────┘ └─────────────────┘ └─────────────────┘
+        │                   │                   │
+        │                   │                   │
+┌───────▼────────┐ ┌────────▼────────┐ ┌────────▼────────┐
+│   LoadAI       │ │   MemoryNode    │ │  Google Gemini  │
+│ (search engine)│ │  (data unit)    │ │    (AI API)     │
+└────────────────┘ └─────────────────┘ └─────────────────┘
+```
+
+### 2.2 데이터 플로우
+```
+사용자 입력
+    │
+    ▼
+MainAI.chat_async()
+    │
+    ├─── 기억 검색 필요성 판단
+    │    │
+    │    ▼
+    │    LoadAI.search_parallel() ──→ 관련 기억 검색
+    │
+    ▼
+AI 응답 생성
+    │
+    ▼
+AuxiliaryAI.handle_conversation()
+    │
+    ├─── 기존 카테고리 관련성 검사
+    │    │
+    │    ▼
+    │    AI 기반 카테고리 분류
+    │    │
+    │    ├─── 단일 카테고리 → 기존/새 노드 판단
+    │    └─── 다중 카테고리 → 대화 내용 분리
+    │
+    ▼
+MemoryManager.add_node() ──→ JSON 파일 저장
+```
+
+### 2.3 메모리 트리 구조
+```
+ROOT
+├── 소개 (Category)
+│   ├── 이름 (Topic Node)
+│   ├── 학교 (Topic Node)
+│   └── 취미 (Topic Node)
+├── 과일 (Category)
+│   ├── 사과 (Topic Node)
+│   │   ├── 사과 맛 (Sub-topic)
+│   │   └── 사과 독성 (Sub-topic)
+│   └── 포도 (Topic Node)
+├── 동물 (Category)
+│   ├── 고양이 (Topic Node)
+│   └── 강아지 (Topic Node)
+└── 과학 (Category)
+    ├── 물리학 (Topic Node)
+    └── 화학 (Topic Node)
 ```
 
 ## 3. 설치 및 설정
 
-### 3.1 의존성 설치
+### 3.1 시스템 요구사항
+- Python 3.10+
+- Google Gemini API Key
+- Discord Bot Token (Discord 기능 사용 시)
+- 인터넷 연결
 
+### 3.2 의존성 설치
 ```bash
+# 레포지토리 클론
+git clone https://github.com/confidencecat/hierarchical-semantic-memory-system.git
+cd hierarchical-semantic-memory-system
+
+# 패키지 설치
 pip install -r requirements.txt
 ```
 
-### 3.2 환경 변수 설정
-
-`.env` 파일을 생성하고 다음 내용을 추가하세요:
+### 3.3 환경 변수 설정
+`.env` 파일을 생성하고 다음 내용을 추가:
 
 ```env
-# Gemini API 키 (필수)
-API_1=your_gemini_api_key_here
-API_2=your_backup_gemini_api_key_here
+# 필수: Google Gemini API 키
+API_1=your_primary_gemini_api_key
+API_2=your_backup_gemini_api_key
 
-# 병렬 검색용 LOAD API 키들 (선택사항, 성능 향상)
+# 선택: 검색 성능 향상용 추가 API 키
 LOAD_1=your_load_api_key_1
 LOAD_2=your_load_api_key_2
+LOAD_3=your_load_api_key_3
+
+# Discord 봇 사용 시 필수
+DISCORD_TOKEN=your_discord_bot_token
+```
+
+### 3.4 API 키 발급 방법
+1. **Google Gemini API**:
+   - [Google AI Studio](https://makersuite.google.com/app/apikey) 접속
+   - API 키 생성 및 복사
+   
+2. **Discord Bot Token**:
+   - [Discord Developer Portal](https://discord.com/developers/applications) 접속
+   - New Application 생성 → Bot 메뉴 → Token 복사
+
+## 4. 사용법
+
+### 4.1 기본 명령어
+```bash
+# 테스트 모드 (33개 예제 질문으로 테스트)
+python main.py --mode test
+
+# 대화형 모드
+python main.py --mode chat
+
+# Discord 봇 모드
+python main.py --mode discord
+
+# 디버그 모드 (AI 분류 과정 실시간 출력)
+python main.py --mode chat --debug
+
+# 강제 검색 모드 (모든 대화에서 기억 탐색)
+python main.py --mode chat --force-search
+
+# 트리 구조만 출력
+python main.py --tree
+
+# API 정보 확인
+python main.py --api-info
+```
+
+### 4.2 Discord 봇 명령어
+```
+!help        - 도움말 표시
+!tree        - 현재 기억 트리 구조 표시  
+!status      - 봇 상태 정보
+!clear       - 서버의 기억 초기화 (관리자만)
+!force [on/off] - 강제 검색 모드 토글 (관리자만)
+!debug [on/off] - 디버그 모드 토글 (관리자만)
+```
+
+### 4.3 사용 예시
+```bash
+# 디버그 모드로 대화 시작
+python main.py --mode chat --debug
+
+사용자: 나는 사과를 좋아한다. 그런데 강아지도 사과를 먹을 수 있나?
+🐛 [DEBUG] === AI 분류 시작 ===
+🐛 [DEBUG] 관련 카테고리: ['과일', '동물']
+🐛 [DEBUG] 대화 분리 결과:
+🐛 [DEBUG] 과일: "나는 사과를 좋아한다"
+🐛 [DEBUG] 동물: "강아지도 사과를 먹을 수 있나?"
+```
+
+## 5. 핵심 클래스 및 함수
+
+### 5.1 MainAI 클래스
+**파일**: `hierarchical.py`  
+**역할**: 사용자와의 주요 인터페이스, 대화 흐름 제어
+
+#### 주요 메서드:
+```python
+class MainAI:
+    def __init__(self, force_search=False, debug=False):
+        """메인 AI 초기화
+        Args:
+            force_search: 모든 대화에서 강제 검색 수행 여부
+            debug: 디버그 모드 활성화 여부
+        """
+    
+    async def chat_async(self, user_input: str) -> str:
+        """비동기 대화 처리
+        1. 기억 검색 필요성 판단
+        2. 관련 기억 검색 (필요시)
+        3. AI 응답 생성
+        4. 대화 내용 분류 및 저장
+        """
+    
+    def _needs_memory_search(self, user_input: str) -> bool:
+        """기억 검색 필요성 판단 (키워드 기반 빠른 판단)"""
+    
+    async def _search_memory_async(self, user_input: str) -> str:
+        """병렬 기억 검색 수행"""
+```
+
+### 5.2 AuxiliaryAI 클래스  
+**파일**: `hierarchical.py`  
+**역할**: AI 기반 대화 분류 및 메모리 트리 관리
+
+#### 주요 메서드:
+```python
+class AuxiliaryAI:
+    async def handle_conversation(self, conversation: list):
+        """대화 분류 및 저장 메인 함수
+        1. 기존 카테고리와의 관련성 검사
+        2. 다중 카테고리 대화 분리
+        3. 적절한 노드에 저장
+        """
+    
+    async def _check_category_relevance_async(self, user_input: str, categories: dict) -> dict:
+        """AI를 사용한 카테고리 관련성 판단
+        Returns:
+            dict: {카테고리명: True/False}
+        """
+    
+    async def _separate_conversation_by_categories(self, user_input: str, ai_response: str, categories: list) -> dict:
+        """다중 주제 대화를 카테고리별로 분리
+        Returns:
+            dict: {카테고리명: {'user': 분리된_사용자_발언, 'ai': 분리된_AI_응답}}
+        """
+    
+    async def _create_new_category_and_node(self, conversation: list, conversation_index: int):
+        """새 카테고리 및 하위 노드 생성"""
+```
+
+### 5.3 MemoryManager 클래스
+**파일**: `hierarchical.py`  
+**역할**: 메모리 트리 구조 관리 및 JSON 파일 저장
+
+#### 주요 메서드:
+```python
+class MemoryManager:
+    def __init__(self):
+        """메모리 관리자 초기화 및 기존 데이터 로드"""
+    
+    def add_node(self, node: MemoryNode, parent_id: str = None):
+        """트리에 새 노드 추가"""
+    
+    def get_node(self, node_id: str) -> MemoryNode:
+        """노드 ID로 노드 검색"""
+    
+    def save_to_all_memory(self, conversation: list) -> int:
+        """전체 대화 기록에 저장 후 인덱스 반환"""
+    
+    def save_to_file(self):
+        """메모리 트리를 JSON 파일로 저장"""
+    
+    def print_tree(self, node_id: str = "root", depth: int = 0):
+        """트리 구조 콘솔 출력"""
+```
+
+### 5.4 MemoryNode 클래스
+**파일**: `hierarchical.py`  
+**역할**: 개별 메모리 노드 데이터 구조
+
 LOAD_3=your_load_api_key_3
 # ... 최대 LOAD_20까지
 

@@ -12,12 +12,18 @@ bot = commands.Bot(command_prefix='!', intents=intents, help_command=None)
 
 # 각 서버별로 MainAI 인스턴스를 관리
 ai_instances = {}
+debug_mode = False  # 전역 디버그 모드 설정
 
 def get_ai_instance(guild_id, force_search=False):
     """서버별 AI 인스턴스를 가져오거나 생성합니다."""
     if guild_id not in ai_instances:
-        ai_instances[guild_id] = MainAI(force_search=force_search)
+        ai_instances[guild_id] = MainAI(force_search=force_search, debug=debug_mode)
     return ai_instances[guild_id]
+
+def set_debug_mode(debug):
+    """디버그 모드를 설정합니다."""
+    global debug_mode
+    debug_mode = debug
 
 @bot.event
 async def on_ready():
@@ -89,6 +95,7 @@ async def help_command(ctx):
         `!status` - 봇 상태 정보
         `!clear` - 서버의 기억 초기화 (관리자만)
         `!force [on/off]` - 강제 검색 모드 토글 (관리자만)
+        `!debug [on/off]` - 디버그 모드 토글 (관리자만)
         """,
         inline=False
     )
@@ -248,8 +255,44 @@ async def force_command(ctx, mode: str = None):
         print(f"❌ 강제 모드 명령어 처리 중 오류: {e}")
         await ctx.send("강제 모드 설정 중 오류가 발생했습니다.")
 
+@bot.command(name='debug', aliases=['디버그'])
+@commands.has_permissions(administrator=True)
+async def debug_command(ctx, mode=None):
+    """디버그 모드를 켜거나 끕니다."""
+    global debug_mode
+    
+    try:
+        if mode is None:
+            # 현재 상태 확인
+            status = "켜짐" if debug_mode else "꺼짐"
+            await ctx.send(f"🐛 현재 디버그 모드: **{status}**")
+            return
+        
+        mode_lower = mode.lower()
+        if mode_lower in ['on', '켜기', 'true', '1']:
+            debug_mode = True
+            # 기존 AI 인스턴스들의 디버그 모드도 업데이트
+            for guild_id in ai_instances:
+                ai_instances[guild_id].debug = True
+                ai_instances[guild_id].auxiliary_ai.debug = True
+            await ctx.send("🐛 디버그 모드가 **켜졌습니다**.\n상세 분류 과정이 콘솔에 출력됩니다.")
+        elif mode_lower in ['off', '끄기', 'false', '0']:
+            debug_mode = False
+            # 기존 AI 인스턴스들의 디버그 모드도 업데이트
+            for guild_id in ai_instances:
+                ai_instances[guild_id].debug = False
+                ai_instances[guild_id].auxiliary_ai.debug = False
+            await ctx.send("🐛 디버그 모드가 **꺼졌습니다**.")
+        else:
+            await ctx.send("❌ 올바른 모드를 입력하세요. (on/off, 켜기/끄기)")
+            
+    except Exception as e:
+        print(f"❌ 디버그 모드 명령어 처리 중 오류: {e}")
+        await ctx.send("디버그 모드 설정 중 오류가 발생했습니다.")
+
 @clear_command.error
 @force_command.error
+@debug_command.error
 async def permission_error(ctx, error):
     """권한 오류 처리"""
     if isinstance(error, commands.MissingPermissions):

@@ -29,6 +29,11 @@ def parse_arguments():
         action='store_true',
         help='모든 대화에서 기억 호출 강제 (효율성 무시)'
     )
+    parser.add_argument(
+        '--debug',
+        action='store_true',
+        help='디버그 모드 활성화 (AI 분류 과정, 메모리 상태 등 상세 정보 출력)'
+    )
     return parser.parse_args()
 
 
@@ -133,13 +138,15 @@ def show_tree_structure():
     print("=" * 50)
 
 
-async def run_test_mode(force_search=False):
+async def run_test_mode(force_search=False, debug=False):
     """테스트 모드로 실행합니다."""
     print("=== 계층적 의미 기억 시스템 시작 (테스트 모드) ===")
     if force_search:
         print("⚡ 강제 검색 모드: 모든 대화에서 기억 탐색을 수행합니다.")
+    if debug:
+        print("🐛 디버그 모드: 상세 정보를 출력합니다.")
     
-    main_ai_instance = MainAI(force_search=force_search)
+    main_ai_instance = MainAI(force_search=force_search, debug=debug)
     
     # 테스트 질문들 - 더 다양한 시나리오 추가
     test_questions = [
@@ -180,13 +187,15 @@ async def run_test_mode(force_search=False):
         # 기억 검색 테스트 시리즈 (비동기 병렬 검색 테스트)
         "저번에 내 이름이 뭐라고 했지?",
         "저번에 나에 대한 소개를 했는데, 나에 대한 정보를 모두 말해봐.",
-        "내가 사과를 싫어하는 이유는?",
+        "저번에 말한 내가 사과를 싫어하는 이유는?",
         "저번에 내가 포도를 싫어하는 이유를 말했다. 그 내용이 무엇인가?",
         "내가 좋아하는 과목이 뭐였지?",
         "내 친구 이름이 뭐였나?",
         "과일 중에서 내가 부정적으로 생각하는 것들은?",
         "내가 언급한 동물들 모두 말해봐",
-        "지금까지 내가 물어본 음식 관련 질문들은?"
+        "지금까지 내가 물어본 음식 관련 질문들은?",
+        "나는 사과를 좋아하는데, 사과가 가장 맛있는것 같아. 하지만 동물들은 사과를 별로 좋아하지 않는다.",
+        "나는 영어의 난해한 부분을 좋아한다. 그리고 과학에서는 발견하지 못한 부분을 좋아한다"
     ]
 
     for i, question in enumerate(test_questions):
@@ -217,15 +226,17 @@ async def run_test_mode(force_search=False):
     print(f"트리 구조:\n{final_status['tree_summary']}")
 
 
-async def run_chat_mode(force_search=False):
+async def run_chat_mode(force_search=False, debug=False):
     """대화형 모드로 실행합니다."""
     print("=== 계층적 의미 기억 시스템 시작 (대화형 모드) ===")
     if force_search:
         print("⚡ 강제 검색 모드: 모든 대화에서 기억 탐색을 수행합니다.")
     else:
         print("⚡ 효율 모드: 필요한 경우에만 기억 탐색을 수행합니다.")
+    if debug:
+        print("🐛 디버그 모드: 상세 정보를 출력합니다.")
     
-    main_ai_instance = MainAI(force_search=force_search)
+    main_ai_instance = MainAI(force_search=force_search, debug=debug)
     
     print("\n=== 대화형 모드 (종료하려면 'exit' 입력) ===")
     while True:
@@ -242,11 +253,14 @@ async def run_chat_mode(force_search=False):
         print(f"(처리 시간: {end_time - start_time:.2f}초)")
 
 
-def run_discord_mode():
+def run_discord_mode(debug=False):
     """Discord 봇 모드로 실행합니다."""
     print("=== Discord 봇 모드 시작 ===")
+    if debug:
+        print("🐛 디버그 모드: 상세 정보를 출력합니다.")
     try:
         import hsms_discord
+        hsms_discord.set_debug_mode(debug)  # 디버그 모드 설정
         hsms_discord.run_bot()
     except ImportError as e:
         print(f"❌ Import 오류: {e}")
@@ -277,8 +291,8 @@ if __name__ == '__main__':
             exit(0)
     
     if args.mode == 'test':
-        asyncio.run(run_test_mode(force_search=args.force_search))
+        asyncio.run(run_test_mode(force_search=args.force_search, debug=args.debug))
     elif args.mode == 'chat':
-        asyncio.run(run_chat_mode(force_search=args.force_search))
+        asyncio.run(run_chat_mode(force_search=args.force_search, debug=args.debug))
     elif args.mode == 'discord':
-        run_discord_mode()
+        run_discord_mode(debug=args.debug)
