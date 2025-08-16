@@ -10,6 +10,264 @@
 - **🎯 의미적 분류**: AI 기반 자동 주제 추출 및 카테고리 배치
 - **📊 시각적 트리 구조**: 직관적인 기억 구조 시각화
 - **🔧 명령줄 인터페이스**: 다양한 실행 모드와 옵션 지원
+- **🤖 Discord 봇 지원**: Discord에서 실시간 대화 및 기억 관리
+- **⚙️ 모듈화된 구조**: 핵심 로직과 인터페이스 분리
+
+## 2. 파일 구조
+
+```
+hierarchical_semantic_memory_system/
+├── main.py                 # 메인 실행 파일 (명령줄 인터페이스)
+├── hierarchical.py         # 핵심 클래스들 (메모리 관리, AI 호출)
+├── discord.py             # Discord 봇 구현
+├── config.py              # 설정 파일 (API 키, Fine-tuning 데이터)
+├── requirements.txt       # 필요한 Python 패키지
+├── README.md             # 프로젝트 문서
+└── memory/               # 기억 저장소
+    ├── hierarchical_memory.json  # 트리 구조 데이터
+    └── all_memory.json           # 전체 대화 기록
+```
+
+## 3. 설치 및 설정
+
+### 3.1 의존성 설치
+
+```bash
+pip install -r requirements.txt
+```
+
+### 3.2 환경 변수 설정
+
+`.env` 파일을 생성하고 다음 내용을 추가하세요:
+
+```env
+# Gemini API 키 (필수)
+API_1=your_gemini_api_key_here
+API_2=your_backup_gemini_api_key_here
+
+# 병렬 검색용 LOAD API 키들 (선택사항, 성능 향상)
+LOAD_1=your_load_api_key_1
+LOAD_2=your_load_api_key_2
+LOAD_3=your_load_api_key_3
+# ... 최대 LOAD_20까지
+
+# Discord 봇 토큰 (Discord 모드 사용 시 필수)
+DISCORD_TOKEN=your_discord_bot_token_here
+```
+
+## 4. 사용법
+
+### 4.1 기본 실행
+
+```bash
+# 대화형 모드 (기본)
+python main.py
+
+# 테스트 모드
+python main.py --mode test
+
+# Discord 봇 모드
+python main.py --mode discord
+
+# 모든 대화에서 기억 호출 강제
+python main.py --force-search
+
+# 트리 구조 시각화
+python main.py --tree
+
+# API 키 정보 확인
+python main.py --api-info
+```
+
+### 4.2 사용 가능한 옵션
+
+| 옵션 | 설명 |
+|------|------|
+| `--mode {test,chat,discord}` | 실행 모드 선택 |
+| `--force-search` | 모든 대화에서 기억 탐색 강제 |
+| `--tree` | 현재 트리 구조 시각화 출력 |
+| `--api-info` | 사용 가능한 API 키 정보 표시 |
+
+### 4.3 Discord 봇 사용법
+
+Discord 봇을 사용하려면:
+
+1. Discord Developer Portal에서 봇을 생성하고 토큰을 획득
+2. `.env` 파일에 `DISCORD_TOKEN` 추가
+3. `python main.py --mode discord` 실행
+
+**Discord 봇 명령어:**
+- `!help` - 도움말 표시
+- `!tree` - 현재 기억 트리 구조 표시
+- `!status` - 봇 상태 정보
+- `!clear` - 서버의 기억 초기화 (관리자만)
+- `!force [on/off]` - 강제 검색 모드 토글 (관리자만)
+
+**사용법:**
+- 봇을 멘션(`@봇이름`)하고 질문
+- DM으로 직접 대화 가능
+
+## 5. 시스템 아키텍처
+
+### 5.1 모듈별 역할
+
+#### main.py
+- 명령줄 인터페이스 제공
+- 테스트/채팅/Discord 모드 관리
+- 설정 옵션 처리
+
+#### hierarchical.py
+- **DataManager**: 파일 입출력 및 JSON 관리
+- **MemoryNode**: 개별 기억 노드 클래스
+- **MemoryManager**: 계층적 트리 구조 관리
+- **AIManager**: AI 호출 및 비동기 처리
+- **AuxiliaryAI**: 기억 분류 및 저장 로직
+- **MainAI**: 사용자 대화 처리
+
+#### discord.py
+- Discord 봇 구현
+- 서버별 독립적인 기억 관리
+- 관리자 명령어 지원
+
+#### config.py
+- API 키 및 환경 변수 관리
+- Fine-tuning 데이터 정의
+- 파일 경로 설정
+
+### 5.2 트리 구조 예시
+
+```
+🌳 ROOT
+├── 📁 과일 (카테고리)
+│   ├── 🍎 사과 (대화: 5~7)
+│   ├── 🍇 포도 (대화: 8~10)
+│   └── 🍓 딸기 (대화: 11~11)
+├── 📁 동물 (카테고리)
+│   ├── 🐱 고양이 (대화: 14~16)
+│   └── 🐶 개 (대화: 17~19)
+└── 👤 개인정보 (대화: 0~4)
+    ├── 📝 이름 (대화: 0~0)
+    └── 🏫 학교 (대화: 1~1)
+```
+
+## 6. 주요 기능
+
+### 6.1 효율성 옵션
+
+**기본 모드 (효율성 우선):**
+- 키워드 기반 빠른 판단으로 기억 검색 최소화
+- 단순한 질문에는 탐색 생략
+
+**강제 검색 모드 (`--force-search`):**
+- 모든 대화에서 기억 탐색 수행
+- 완전한 맥락 인식을 원하는 경우 사용
+
+### 6.2 비동기 병렬 검색
+
+- 다중 LOAD API 키를 활용한 병렬 처리
+- 라운드 로빈 방식으로 부하 분산
+- 검색 속도 대폭 향상
+
+### 6.3 카테고리 자동 분류
+
+지원되는 카테고리:
+- **과일**: 사과, 포도, 딸기, 바나나 등
+- **동물**: 개, 고양이, 토끼, 새 등
+- **음식**: 요리, 레시피, 음식점 등
+- **과목**: 수학, 영어, 과학, 사회 등
+
+## 7. API 키 설정
+
+### 7.1 Gemini API 키 획득
+
+1. [Google AI Studio](https://makersuite.google.com/app/apikey) 방문
+2. API 키 생성
+3. `.env` 파일에 `API_1` 추가
+
+### 7.2 Discord 봇 토큰 획득
+
+1. [Discord Developer Portal](https://discord.com/developers/applications) 방문
+2. 새 애플리케이션 생성
+3. Bot 섹션에서 토큰 복사
+4. `.env` 파일에 `DISCORD_TOKEN` 추가
+
+## 8. 성능 최적화
+
+### 8.1 LOAD API 키 활용
+
+병렬 검색 성능 향상을 위해 여러 개의 Gemini API 키를 `LOAD_1`, `LOAD_2`, ... `LOAD_20`으로 설정할 수 있습니다.
+
+### 8.2 메모리 효율성
+
+- 카테고리 노드 보호로 의미 구조 보존
+- 좌표 기반 인덱싱으로 효율적인 검색
+- 지연 로딩으로 필요한 데이터만 로드
+
+## 9. 문제 해결
+
+### 9.1 일반적인 오류
+
+**"API 키가 설정되지 않았습니다"**
+- `.env` 파일의 `API_1` 확인
+- 파일 경로가 올바른지 확인
+
+**"Discord 토큰이 올바르지 않습니다"**
+- `.env` 파일의 `DISCORD_TOKEN` 확인
+- 토큰이 유효한지 Discord Developer Portal에서 확인
+
+**"모듈을 찾을 수 없습니다"**
+- `pip install -r requirements.txt` 실행
+- Python 버전 확인 (3.8 이상 권장)
+
+### 9.2 성능 이슈
+
+**검색이 느린 경우:**
+- LOAD API 키를 추가하여 병렬 처리 활성화
+- `--force-search` 옵션 비활성화
+
+**메모리 사용량이 큰 경우:**
+- 주기적으로 트리 정리
+- 오래된 대화 기록 아카이빙
+
+## 10. 개발 및 확장
+
+### 10.1 새로운 카테고리 추가
+
+`hierarchical.py`의 `find_or_create_category_node` 함수에서 키워드를 추가할 수 있습니다:
+
+```python
+# 새로운 카테고리 추가 예시
+hobby_keywords = ['게임', '영화', '독서', '운동', ...]
+if any(keyword in user_input for keyword in hobby_keywords):
+    return self.get_or_create_category_node('취미', '취미 활동에 대한 대화')
+```
+
+### 10.2 새로운 인터페이스 추가
+
+모듈화된 구조 덕분에 새로운 인터페이스(웹, Telegram 등)를 쉽게 추가할 수 있습니다:
+
+```python
+# 새로운 인터페이스 예시
+from hierarchical import MainAI
+
+def web_interface():
+    ai = MainAI(force_search=False)
+    # 웹 인터페이스 구현
+```
+
+## 11. 라이선스
+
+이 프로젝트는 오픈소스이며, 자유롭게 수정하고 배포할 수 있습니다.
+
+## 12. 기여
+
+버그 리포트, 기능 제안, 풀 리퀘스트를 환영합니다!
+
+---
+
+**개발팀**: 계층적 의미 기억 시스템  
+**버전**: 2.0  
+**최종 업데이트**: 2025년 8월
 
 ## 2. 시스템 아키텍처
 

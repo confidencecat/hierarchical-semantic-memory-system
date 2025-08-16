@@ -29,6 +29,9 @@ API_KEY = {
     'API_2': os.getenv('API_2'),
 }
 
+# Discord 봇 토큰 (선택사항)
+DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
+
 # 계층적 의미 기억 시스템용 미세조정 데이터
 
 # 관련 노드 탐색 (f_find_node)

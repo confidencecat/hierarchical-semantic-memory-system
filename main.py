@@ -1,445 +1,284 @@
-import json
-import os
-import google.generativeai as genai
-import concurrent.futures
+import asyncio
+import argparse
 import time
-from google.api_core.exceptions import ResourceExhausted
-from config import *
+from hierarchical import MainAI, MemoryManager
+from config import API_KEY, LOAD_API_KEYS
 
 
-class DataManager:
-    """데이터 관리를 담당하는 클래스 - 파일 입출력 및 메모리 관리"""
+def parse_arguments():
+    """명령줄 인수를 파싱합니다."""
+    parser = argparse.ArgumentParser(description='계층적 의미 기억 시스템')
+    parser.add_argument(
+        '--mode', 
+        choices=['test', 'chat', 'discord'], 
+        default='chat',
+        help='실행 모드: test (기존 질문들로 테스트), chat (대화형 모드), discord (Discord 봇 모드)'
+    )
+    parser.add_argument(
+        '--api-info',
+        action='store_true',
+        help='사용 가능한 API 키 정보 표시'
+    )
+    parser.add_argument(
+        '--tree',
+        action='store_true',
+        help='현재 트리 구조를 도식화하여 표시'
+    )
+    parser.add_argument(
+        '--force-search',
+        action='store_true',
+        help='모든 대화에서 기억 호출 강제 (효율성 무시)'
+    )
+    return parser.parse_args()
+
+
+def show_api_info():
+    """API 키 정보를 표시합니다."""
+    print("=== API 키 정보 ===")
+    print(f"메인 API 키들: {len([k for k in API_KEY.values() if k])}")
+    print(f"LOAD API 키들: {len(LOAD_API_KEYS)}")
+    if LOAD_API_KEYS:
+        print(f"- 비동기 병렬 검색 가능 (최대 {len(LOAD_API_KEYS)}개 동시 처리)")
+    else:
+        print("- 비동기 병렬 검색 제한됨 (LOAD API 키 없음)")
+    print("=" * 20)
+
+
+def show_tree_structure():
+    """현재 트리 구조를 도식화하여 표시합니다."""
+    memory_manager = MemoryManager()
     
-    @staticmethod
-    def load_json(file):
-        if os.path.exists(file):
-            with open(file, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        return []
-
-    @staticmethod
-    def save_json(file, data):
-        folder = os.path.dirname(file)
-        if folder and not os.path.exists(folder):
-            os.makedirs(folder, exist_ok=True)
-        with open(file, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
-
-    @staticmethod
-    def history_str(buf):
-        s = ''
-        for it in buf:
-            if isinstance(it, list):
-                for sub in it:
-                    s += f"{sub['role']}: {sub['content']}\n"
-            elif isinstance(it, dict):
-                s += f"{it['role']}: {it['content']}\n"
-        return s
-
-
-class MemoryManager:
-    """기억 관련 데이터를 관리하는 클래스"""
+    if not memory_manager.memory_tree:
+        print("트리가 비어있습니다.")
+        return
     
-    def __init__(self):
-        self.data_manager = DataManager()
-        self.ensure_memory_files()
+    print("=== 계층적 기억 트리 구조 ===")
+    print(f"총 노드 수: {len(memory_manager.memory_tree)}")
+    print()
     
-    def ensure_memory_files(self):
-        files = [ALL_MEMORY, SEP_MEMORY, BUF_MEMORY, SUM_MEMORY, ENV_MEMORY]
-        for file in files:
-            if not os.path.exists(file):
-                if file == ENV_MEMORY:
-                    self.data_manager.save_json(file, {'BUF_COUNTER': 0, 'CON_COUNTER': 0})
-                else:
-                    self.data_manager.save_json(file, [])
-    
-    def save_to_all_memory(self, conversation):
-        mem = self.data_manager.load_json(ALL_MEMORY)
-        mem.append(conversation)
-        self.data_manager.save_json(ALL_MEMORY, mem)
-    
-    def get_env_counters(self):
-        env = self.data_manager.load_json(ENV_MEMORY) if os.path.exists(ENV_MEMORY) else {'BUF_COUNTER': 0, 'CON_COUNTER': 0}
-        return env['BUF_COUNTER'], env['CON_COUNTER']
-    
-    def update_env_counters(self, buf_counter, con_counter):
-        self.data_manager.save_json(ENV_MEMORY, {'BUF_COUNTER': buf_counter, 'CON_COUNTER': con_counter})
-
-
-class AIManager:
-    """AI 호출을 관리하는 클래스"""
-    
-    @staticmethod
-    def call_ai(prompt='테스트', system='지침', history=None, fine=None, api_key=None, retries=0):
-        if api_key is None:
-            api_key = API_KEY['API_1']
-
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(GEMINI_MODEL, system_instruction=system)
-
-        if fine:
-            ex = ''.join([f"user: {q}\nassistant: {a}\n" for q, a in fine])
-            combined = f"{ex}user: {prompt}"
-        else:
-            his = DataManager.history_str(history if history is not None else [])
-            combined = f"{his}user: {prompt}"
-
-        attempt = 0
-        while True:
-            try:
-                resp = model.start_chat(history=[]).send_message(combined)
-                txt = resp._result.candidates[0].content.parts[0].text.strip()
-                result = txt[9:].strip() if txt.lower().startswith('assistant:') else txt
-                return result
-            except ResourceExhausted:
-                attempt += 1
-                if attempt > retries:
-                    return ''
-                wait = 2 ** attempt
-                time.sleep(wait)
-
-
-class AuxiliaryAI:
-    """보조 인공지능 - 시스템의 전체적인 기억 관리와 대화 흐름 제어"""
-    
-    def __init__(self, memory_manager):
-        self.memory_manager = memory_manager
-        self.ai_manager = AIManager()
-        self.load_ai = LoadAI(memory_manager)
-    
-    def manage_memory(self, conversation):
+    def build_tree_visualization(node_id, depth=0, is_last=True, prefix=""):
+        if node_id not in memory_manager.memory_tree:
+            return ""
         
-        self.memory_manager.save_to_all_memory(conversation)
+        node = memory_manager.memory_tree[node_id]
         
-        buf_counter, con_counter = self.memory_manager.get_env_counters()
+        # 트리 구조 문자
+        connector = "└── " if is_last else "├── "
         
-        current_summary = self.memory_manager.data_manager.load_json(SUM_MEMORY) if os.path.exists(SUM_MEMORY) else None
+        # 노드 타입별 이모지
+        if node.topic == "ROOT":
+            emoji = "🌳"
+        elif node.coordinates["start"] == -1:  # 카테고리 노드
+            emoji = "📁"
+        else:  # 대화 노드
+            emoji = "💬"
         
-        if not current_summary:
-            new_summary = self.create_comprehensive_summary(conversation)
-            self.memory_manager.data_manager.save_json(SUM_MEMORY, new_summary)
-            
-            buf_memory = self.memory_manager.data_manager.load_json(BUF_MEMORY)
-            buf_memory.append(conversation)
-            self.memory_manager.data_manager.save_json(BUF_MEMORY, buf_memory)
-            return
-        
-        topic_changed = self.detect_topic_change(current_summary, conversation)
-        
-        if topic_changed:
-            self.move_to_separated_memory(current_summary, buf_counter, con_counter)
-            
-            new_summary = self.create_comprehensive_summary(conversation)
-            self.memory_manager.data_manager.save_json(SUM_MEMORY, new_summary)
-            self.memory_manager.data_manager.save_json(BUF_MEMORY, [conversation])
-            
-            self.memory_manager.update_env_counters(buf_counter + 1, con_counter + 1)
-        else:
-            updated_summary = self.update_summary(current_summary, conversation)
-            self.memory_manager.data_manager.save_json(SUM_MEMORY, updated_summary)
-            
-            buf_memory = self.memory_manager.data_manager.load_json(BUF_MEMORY)
-            buf_memory.append(conversation)
-            self.memory_manager.data_manager.save_json(BUF_MEMORY, buf_memory)
-            
-            self.memory_manager.update_env_counters(buf_counter, con_counter + 1)
-    
-    def create_comprehensive_summary(self, conversation):
-        system_prompt = """당신은 대화 내용을 정확하고 포괄적으로 요약하는 전문가다.
-다음 원칙에 따라 요약하라:
-
-1. 사용자가 말한 내용과 AI가 응답한 내용을 모두 포함하라
-2. 핵심 주제, 중요한 정보, 구체적인 세부사항을 놓치지 마라
-3. 대화의 맥락과 흐름을 유지하라
-4. 요약문에는 따옴표("), 백슬래시(\), 작은따옴표(')를 사용하지 마라
-5. 간결하면서도 완전한 정보를 담아야 한다
-
-형식: "사용자가 [사용자 내용 요약]에 대해 이야기했고, AI는 [AI 응답 요약]로 답변했다."
-"""
-        
-        user_content = conversation[0]['content']
-        ai_content = conversation[1]['content']
-        
-        prompt = f"사용자: {user_content}\nAI: {ai_content}\n\n위 대화를 요약해달라."
-        
-        return self.ai_manager.call_ai(prompt=prompt, system=system_prompt)
-    
-    def update_summary(self, current_summary, new_conversation):
-        system_prompt = """당신은 기존 대화 요약에 새로운 대화 내용을 통합하는 전문가다.
-다음 원칙에 따라 요약을 업데이트하라:
-
-1. 기존 요약의 내용을 유지하면서 새로운 내용을 자연스럽게 통합하라
-2. 사용자 발언과 AI 응답을 모두 포함하라
-3. 중복되는 내용은 간결하게 정리하라
-4. 새로운 정보나 주제 전개를 명확히 반영하라
-5. 요약문에는 따옴표("), 백슬래시(\), 작은따옴표(')를 사용하지 마라
-
-최종 요약은 전체 대화 흐름을 이해할 수 있도록 작성하라.
-"""
-        
-        user_content = new_conversation[0]['content']
-        ai_content = new_conversation[1]['content']
-        
-        prompt = f"""기존 요약: {current_summary}
-
-새로운 대화:
-사용자: {user_content}
-AI: {ai_content}
-
-기존 요약에 새로운 대화를 통합하여 업데이트된 요약을 작성해달라."""
-        
-        return self.ai_manager.call_ai(prompt=prompt, system=system_prompt)
-    
-    def detect_topic_change(self, current_summary, new_conversation):
-        system_prompt = """당신은 대화의 주제 변화를 감지하는 전문가다.
-기존 대화 요약과 새로운 대화를 비교하여 주제가 크게 바뀌었는지 정확히 판단하라.
-
-주제 변경으로 판단하는 경우 (True):
-- 완전히 다른 대상이나 물건에 대한 이야기 (예: 사과 → 포도, 영화 → 음식)
-- 전혀 다른 분야나 영역으로의 전환 (예: 건강 → 여행, 공부 → 게임)
-- 이전 대화와 논리적 연관성이 거의 없는 새로운 주제
-- 상황이나 맥락이 완전히 바뀐 경우
-
-주제 연속으로 판단하는 경우 (False):
-- 같은 사람에 대한 추가 정보 (예: 이름 → 나이 → 학교)
-- 같은 대상에 대한 세부 질문 (예: 사과에 대한 설명 → 사과 씨앗 → 사과 영양소)
-- 관련된 하위 주제로의 자연스러운 전개
-- 이전 내용과 논리적 연관성이 있는 질문이나 대화
-
-예시:
-- "내 이름은 홍길동" → "나는 20살" = False (같은 사람 정보)
-- "사과 설명" → "사과 씨앗" = False (같은 대상의 세부사항)
-- "사과 이야기" → "포도 이야기" = True (다른 과일)
-- "영화 추천" → "음식 추천" = True (다른 분야)
-
-반드시 "True" (주제 변경) 또는 "False" (주제 연속)로만 답하라."""
-        
-        user_content = new_conversation[0]['content']
-        ai_content = new_conversation[1]['content']
-        
-        prompt = f"""기존 대화 요약: {current_summary}
-
-새로운 대화:
-사용자: {user_content}
-AI: {ai_content}
-
-위 새로운 대화가 기존 요약의 주제와 크게 다른지 판단하라."""
-        
-        result = self.ai_manager.call_ai(prompt=prompt, system=system_prompt, fine=SEPFINE)
-        return result.strip() == 'True'
-    
-    def move_to_separated_memory(self, summary, buf_counter, con_counter):
-        sep_memory = self.memory_manager.data_manager.load_json(SEP_MEMORY)
-        sep_memory.append([{
-            'SUMMARIZATION': summary,
-            'NUM': buf_counter,
-            'LOAD': con_counter
-        }])
-        self.memory_manager.data_manager.save_json(SEP_MEMORY, sep_memory)
-    
-    def retrieve_relevant_memories(self, user_query):
-        return self.load_ai.search_memories(user_query)
-
-
-class LoadAI:
-    """로드 인공지능 - 주제별로 분할된 기억을 전담하는 개별 인공지능"""
-    
-    def __init__(self, memory_manager):
-        self.memory_manager = memory_manager
-        self.ai_manager = AIManager()
-    
-    def search_memories(self, query):
-        buf_counter, con_counter = self.memory_manager.get_env_counters()
-        
-        sep_memory = self.memory_manager.data_manager.load_json(SEP_MEMORY)
-        current_summary = self.memory_manager.data_manager.load_json(SUM_MEMORY) if os.path.exists(SUM_MEMORY) else None
-        
-        all_summaries = []
-        for i, entry in enumerate(sep_memory):
-            all_summaries.append((i, entry[0]['SUMMARIZATION']))
-        
-        if current_summary:
-            all_summaries.append(('current', current_summary))
-        
-        if not all_summaries:
-            return None
-        
-        print("start_load")
-        related_indices = self.find_relevant_summaries_async(all_summaries, query)
-        print("end_load")
-
-        if not related_indices:
-            return None
-        
-        return self.extract_conversation_data(related_indices, sep_memory)
-    
-    def find_relevant_summaries_async(self, summaries_with_index, query):
-        system_prompt = """당신은 사용자의 질문과 요약 데이터의 연관성을 판단하는 전문가다.
-반드시 "True" 또는 "False"만 출력하라."""
-        
-        related_indices = []
-        
-        available_api_keys = list(API_KEY.values())
-        num_summaries = len(summaries_with_index)
-        num_api_keys = len(available_api_keys)
-        
-        api_key_assignments = []
-        for i, (idx, summary) in enumerate(summaries_with_index):
-            assigned_api_key = available_api_keys[i % num_api_keys]
-            api_key_assignments.append((idx, summary, assigned_api_key))
-        
-        max_workers = min(1, num_summaries, num_api_keys)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_idx = {
-                executor.submit(self.check_single_relevance, query, summary, system_prompt, api_key): idx
-                for idx, summary, api_key in api_key_assignments
-            }
-            
-            for future in concurrent.futures.as_completed(future_to_idx):
-                idx = future_to_idx[future]
-                try:
-                    is_related = future.result()
-                    
-                    if is_related:
-                        print(f"index : {idx} : {is_related}")
-                        related_indices.append(idx)
-                except Exception as e:
-                    pass
-        
-        return related_indices
-
-    def find_relevant_summaries(self, summaries_with_index, query):
-        return self.find_relevant_summaries_async(summaries_with_index, query)
-    
-    def check_single_relevance(self, query, summary, system_prompt, api_key=None):
-        prompt = f"사용자 질문: {query}\n요약 데이터: {summary}\n\n위 질문과 요약 데이터가 관련이 있는지 판단하라."
-        
-        result = self.ai_manager.call_ai(prompt=prompt, system=system_prompt, fine=ISSAMEFINE, api_key=api_key)
-
-        return result.strip() == 'True'
-    
-    def extract_conversation_data(self, related_indices, sep_memory):
-        all_memory = self.memory_manager.data_manager.load_json(ALL_MEMORY)
-        conversation_data = []
-        
-        for idx in related_indices:
-            if idx == 'current':
-                buf_memory = self.memory_manager.data_manager.load_json(BUF_MEMORY)
-                for conv in buf_memory:
-                    if isinstance(conv, list):
-                        conversation_data.extend(conv)
-                    else:
-                        conversation_data.append(conv)
+        # 좌표 정보
+        coord_info = ""
+        if node.coordinates["start"] >= 0:
+            if node.coordinates["start"] == node.coordinates["end"]:
+                coord_info = f" (대화: {node.coordinates['start']})"
             else:
-                if idx < len(sep_memory):
-                    entry = sep_memory[idx][0]
-                    start_idx = 0 if idx == 0 else sep_memory[idx-1][0]['LOAD'] + 1
-                    end_idx = entry['LOAD'] + 1
-                    
-                    for conv in all_memory[start_idx:end_idx]:
-                        if isinstance(conv, list):
-                            conversation_data.extend(conv)
-                        else:
-                            conversation_data.extend([conv[0], conv[1]])
+                coord_info = f" (대화: {node.coordinates['start']}~{node.coordinates['end']})"
+        elif node.topic != "ROOT":
+            coord_info = " (카테고리)"
         
-        return conversation_data if conversation_data else None
-
-
-class MainAI:
-    """메인 인공지능 - 사용자와 직접 대화하는 주체"""
+        # 현재 노드 출력
+        result = f"{prefix}{connector}{emoji} {node.topic}{coord_info}\n"
+        
+        # 요약 정보 (카테고리가 아닌 경우)
+        if node.coordinates["start"] != -1 and node.summary and depth < 2:
+            summary_prefix = prefix + ("    " if is_last else "│   ")
+            summary_text = node.summary[:50] + "..." if len(node.summary) > 50 else node.summary
+            result += f"{summary_prefix}💬 {summary_text}\n"
+        
+        # 자식 노드들 처리
+        children_ids = node.children_ids
+        for i, child_id in enumerate(children_ids):
+            if child_id in memory_manager.memory_tree:
+                new_prefix = prefix + ("    " if is_last else "│   ")
+                is_last_child = (i == len(children_ids) - 1)
+                result += build_tree_visualization(child_id, depth + 1, is_last_child, new_prefix)
+        
+        return result
     
-    def __init__(self):
-        self.memory_manager = MemoryManager()
-        self.auxiliary_ai = AuxiliaryAI(self.memory_manager)
-        self.ai_manager = AIManager()
+    # 루트부터 시작하여 전체 트리 구성
+    tree_visual = build_tree_visualization(memory_manager.root_node_id)
+    print(tree_visual)
     
-    def chat(self, user_input):
-        
-        if not user_input or user_input.strip() == 'False':
-            return 'NONE'
-        
-        needs_memory = self.check_memory_need(user_input)
-        
-        if needs_memory:
-            relevant_memories = self.auxiliary_ai.retrieve_relevant_memories(user_input)
-            if relevant_memories:
-                response = self._generate_response_with_memory(user_input, relevant_memories)
-            else:
-                response = self._generate_simple_response(user_input)
-        else:
-            response = self._generate_simple_response(user_input)
-        
-        conversation = [
-            {'role': 'user', 'content': user_input},
-            {'role': 'assistant', 'content': response}
-        ]
-        self.auxiliary_ai.manage_memory(conversation)
-        
-        return response
+    # 통계 정보
+    print("=" * 50)
+    print("📊 트리 통계:")
     
-    def check_memory_need(self, user_input):
-        system_prompt = """당신은 사용자의 말을 분석하여 과거의 대화 내용이 필요한지 판단하는 전문가다.
-반드시 "True" 또는 "False"만 출력하라."""
-
-        prompt = f"사용자 입력: {user_input}\n위 입력이 과거 대화 내용을 필요로 하는지 판단하라."
-        
-        result = self.ai_manager.call_ai(prompt=prompt, system=system_prompt, fine=JUDGEFINE)
-        return result.strip() == 'True'
+    # 카테고리별 노드 수 계산
+    categories = {}
+    conversation_nodes = 0
     
-    def _generate_simple_response(self, user_input):
-        system_prompt = """전문적이면서도 친근한 톤으로 대화하라.
-이모티콘을 사용하지 말고 간단하고 명확하게 응답하라."""
-        
-        return self.ai_manager.call_ai(prompt=user_input, system=system_prompt)
+    for node in memory_manager.memory_tree.values():
+        if node.coordinates["start"] == -1:  # 카테고리 노드
+            categories[node.topic] = len(node.children_ids)
+        elif node.coordinates["start"] >= 0:  # 대화 노드
+            conversation_nodes += 1
     
-    def _generate_response_with_memory(self, user_input, memories):
-        system_prompt = """
-사용자의 질문에 답하기 위해 과거 대화 내용이 제공되었다.
-이 정보를 참고하여 정확하고 맥락에 맞는 답변을 제공하라.
-과거 대화 내용을 직접 인용하거나 언급할 때는 자연스럽게 표현하라.
-사용자가 기억하고 있는 내용과 일치하는 정확한 정보를 제공하는 것이 중요하다.
-이모티콘을 사용하지 말고 간단하고 명확하게 응답하라."""
-        
-        return self.ai_manager.call_ai(prompt=user_input, system=system_prompt, history=memories)
+    print(f"- 총 노드 수: {len(memory_manager.memory_tree)}")
+    print(f"- 대화 기록 노드: {conversation_nodes}")
+    print(f"- 카테고리 노드: {len(categories)}")
+    
+    if categories:
+        print("\n📁 카테고리별 하위 노드:")
+        for category, count in categories.items():
+            if category != "ROOT":
+                print(f"  - {category}: {count}개")
+    
+    print("=" * 50)
 
 
-def main_ai(prompt='False'):
-    main_ai_instance = MainAI()
-    return main_ai_instance.chat(prompt)
-
-
-if __name__ == '__main__':
-    main_ai_instance = MainAI()
-
-    Q = [
+async def run_test_mode(force_search=False):
+    """테스트 모드로 실행합니다."""
+    print("=== 계층적 의미 기억 시스템 시작 (테스트 모드) ===")
+    if force_search:
+        print("⚡ 강제 검색 모드: 모든 대화에서 기억 탐색을 수행합니다.")
+    
+    main_ai_instance = MainAI(force_search=force_search)
+    
+    # 테스트 질문들 - 더 다양한 시나리오 추가
+    test_questions = [
+        # 개인 정보 시리즈
         "내 이름은 서재민이다.",
         "내가 다니는 고등학교는 대건고등학교이다.",
         "내가 좋아하는 과목은 수학이다.",
         "내 취미는 독서이다.",
         "가장 친한 친구는 김철수이다.",
+        
+        # 과일 카테고리 시리즈
         "사과에 대해서 궁금하다",
         "사과의 씨에는 독이 있는가?",
         "나는 사과에 대해서 부정적으로 생각한다.",
         "포도에 대해서 궁금하다.",
         "포도의 씨에는 독이 있는가?",
-        "나는 포도에 대해서 부정적으로 생각한다. 왜냐하면 포다는 한 송이이지만 알맹이 모두 맛이 다르기 때문이다.",
-        "나는 딸기 또한 부정적으로 생각한다. 왜냐하면 딸기는 너무 비싸기 때문이다.",
-        "딸기가 왜 비싼지 아는가?",
-        "저번에 내 이름이 뭐라고?",
-        "저번에 나에 대한 소개를 했는데, 나에 대한 아는 정보를 모두 말해라.",
+        "나는 포도에 대해서 부정적으로 생각한다. 왜냐하면 포도는 한 송이이지만 알맹이 모두 맛이 다르기 때문이다.",
+        "딸기는 어떤 맛인가요?",
+        "바나나의 영양가는?",
+        "오렌지 비타민C 함량이 궁금해",
+        
+        # 동물 카테고리 시리즈
+        "고양이는 어떤 성격의 동물인가요?",
+        "강아지 훈련 방법이 궁금해요",
+        "토끼는 어떤 먹이를 먹나요?",
+        "새의 종류에는 뭐가 있나요?",
+        
+        # 음식 카테고리 시리즈
+        "김치찌개 레시피 알려줘",
+        "라면 맛있게 끓이는 법",
+        "파스타 만드는 방법",
+        
+        # 학습 카테고리 시리즈
+        "영어 공부 방법이 궁금해",
+        "과학 실험 재미있는 것들",
+        "역사 공부하는 팁",
+        
+        # 기억 검색 테스트 시리즈 (비동기 병렬 검색 테스트)
+        "저번에 내 이름이 뭐라고 했지?",
+        "저번에 나에 대한 소개를 했는데, 나에 대한 정보를 모두 말해봐.",
         "내가 사과를 싫어하는 이유는?",
-        "저번애 내가 포도를 싫어하는 이유를 말했다. 그 내용이 무엇인가?"
-        "저번에 내가 딸기를 싫어하는 이유를 말했다. 그 내용이 무엇인가?"
+        "저번에 내가 포도를 싫어하는 이유를 말했다. 그 내용이 무엇인가?",
+        "내가 좋아하는 과목이 뭐였지?",
+        "내 친구 이름이 뭐였나?",
+        "과일 중에서 내가 부정적으로 생각하는 것들은?",
+        "내가 언급한 동물들 모두 말해봐",
+        "지금까지 내가 물어본 음식 관련 질문들은?"
     ]
 
-    for q in Q:
-        response = main_ai_instance.chat(q)
-        print(f"Q: {q}\nA: {response}\n")
+    for i, question in enumerate(test_questions):
+        print(f"\n--- 질문 {i+1} ---")
+        print(f"Q: {question}")
+        
+        start_time = time.time()
+        response = await main_ai_instance.chat_async(question)
+        end_time = time.time()
+        
+        print(f"A: {response}")
+        print(f"처리 시간: {end_time - start_time:.2f}초")
+        
+        # 트리 상태 출력 (간단한 정보만)
+        if i < 15:  # 처음 15개 질문에 대해서만 노드 수 표시
+            status = main_ai_instance.get_tree_status()
+            print(f"트리 노드 수: {status['total_nodes']}")
+        
+        # 일부 질문에서는 더 자세한 트리 구조 표시
+        if i == 4 or i == 11 or i == 18:  # 개인정보, 과일, 동물 카테고리 완성 시점
+            print("\n현재 트리 구조:")
+            status = main_ai_instance.get_tree_status()
+            print(status['tree_summary'])
+    
+    print("\n=== 최종 트리 구조 ===")
+    final_status = main_ai_instance.get_tree_status()
+    print(f"총 노드 수: {final_status['total_nodes']}")
+    print(f"트리 구조:\n{final_status['tree_summary']}")
 
-    # while True:
-    #     user_input = input("사용자: ")
-    #     if user_input.lower() in ['exit', 'quit', '종료', '그만']:
-    #         print("AI: 대화를 종료합니다.")
-    #         break
-    #     response = main_ai_instance.chat(user_input)
-    #     print(f"AI: {response}")
+
+async def run_chat_mode(force_search=False):
+    """대화형 모드로 실행합니다."""
+    print("=== 계층적 의미 기억 시스템 시작 (대화형 모드) ===")
+    if force_search:
+        print("⚡ 강제 검색 모드: 모든 대화에서 기억 탐색을 수행합니다.")
+    else:
+        print("⚡ 효율 모드: 필요한 경우에만 기억 탐색을 수행합니다.")
+    
+    main_ai_instance = MainAI(force_search=force_search)
+    
+    print("\n=== 대화형 모드 (종료하려면 'exit' 입력) ===")
+    while True:
+        user_input = input("\n사용자: ")
+        if user_input.lower() in ['exit', 'quit', '종료', '그만']:
+            print("AI: 대화를 종료합니다.")
+            break
+        
+        start_time = time.time()
+        response = await main_ai_instance.chat_async(user_input)
+        end_time = time.time()
+        
+        print(f"AI: {response}")
+        print(f"(처리 시간: {end_time - start_time:.2f}초)")
+
+
+def run_discord_mode():
+    """Discord 봇 모드로 실행합니다."""
+    print("=== Discord 봇 모드 시작 ===")
+    try:
+        import hsms_discord
+        hsms_discord.run_bot()
+    except ImportError as e:
+        print(f"❌ Import 오류: {e}")
+        print("Discord 봇을 실행하려면 hsms_discord.py 파일이 필요합니다.")
+        print("또한 discord.py 라이브러리가 설치되어 있는지 확인하세요: pip install discord.py")
+    except Exception as e:
+        print(f"❌ Discord 봇 실행 중 오류 발생: {e}")
+
+
+def main_ai(prompt='False'):
+    """메인 AI 인스턴스를 생성하고 대화를 처리합니다. (레거시 호환용)"""
+    main_ai_instance = MainAI()
+    return main_ai_instance.chat(prompt)
+
+
+if __name__ == '__main__':
+    args = parse_arguments()
+    
+    if args.api_info:
+        show_api_info()
+    
+    if args.tree:
+        show_tree_structure()
+    
+    # tree나 api_info만 요청한 경우 종료
+    if args.tree or args.api_info:
+        if not (args.mode in ['test', 'chat', 'discord']):
+            exit(0)
+    
+    if args.mode == 'test':
+        asyncio.run(run_test_mode(force_search=args.force_search))
+    elif args.mode == 'chat':
+        asyncio.run(run_chat_mode(force_search=args.force_search))
+    elif args.mode == 'discord':
+        run_discord_mode()
