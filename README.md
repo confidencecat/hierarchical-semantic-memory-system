@@ -47,24 +47,43 @@
                             │
                     ┌───────▼────────┐
                     │   MainAI       │
-                    │ (main interface)│
+                    │(HSMS/MainAI.py)│
                     └───────┬────────┘
                             │
         ┌───────────────────┼───────────────────┐
         │                   │                   │
 ┌───────▼────────┐ ┌────────▼────────┐ ┌────────▼────────┐
 │  AuxiliaryAI   │ │  MemoryManager  │ │   AIManager     │
-│ (categorization)│ │ (tree structure)│ │ (API handling)  │
+│(HSMS/Auxiliary │ │(HSMS/MemoryMgr) │ │(HSMS/AIManager) │
+│  AI.py)        │ │     .py)        │ │     .py)        │
 └────────────────┘ └─────────────────┘ └─────────────────┘
         │                   │                   │
         │                   │                   │
 ┌───────▼────────┐ ┌────────▼────────┐ ┌────────▼────────┐
 │   LoadAI       │ │   MemoryNode    │ │  Google Gemini  │
-│ (search engine)│ │  (data unit)    │ │    (AI API)     │
+│(HSMS/LoadAI.py)│ │(HSMS/MemoryNode │ │    (AI API)     │
+│                │ │     .py)        │ │                 │
 └────────────────┘ └─────────────────┘ └─────────────────┘
 ```
 
-### 2.2 데이터 플로우
+### 2.2 모듈 구조 (NEW!)
+```
+📁 HSMS/ (패키지)
+├── __init__.py              # 패키지 초기화 및 클래스 익스포트
+├── DataManager.py           # 데이터 관리 및 파일 입출력
+├── MemoryNode.py            # 개별 기억 노드 클래스
+├── MemoryManager.py         # 계층적 기억 트리 관리
+├── AIManager.py             # AI 호출 및 비동기 처리 관리
+├── AuxiliaryAI.py           # 보조 AI (핵심 분류 및 기억 처리)
+├── LoadAI.py                # 로드 AI (레거시 호환용)
+└── MainAI.py                # 메인 AI (사용자 대화 처리)
+
+📄 hierarchical.py           # 하위 호환성을 위한 임포트 래퍼
+📄 main.py                   # CLI 메인 실행 파일
+📄 hsms_discord.py           # Discord 봇 인터페이스
+```
+
+### 2.3 데이터 플로우
 ```
 사용자 입력
     │
@@ -498,6 +517,10 @@ if any(keyword in user_input for keyword in hobby_keywords):
 
 ```python
 # 새로운 인터페이스 예시
+# 새로운 모듈 구조 사용 (권장)
+from HSMS import MainAI
+
+# 또는 하위 호환성을 위한 기존 방식
 from hierarchical import MainAI
 
 def web_interface():

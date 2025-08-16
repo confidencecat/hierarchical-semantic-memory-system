@@ -1,7 +1,10 @@
 import asyncio
 import argparse
 import time
-from hierarchical import MainAI, MemoryManager
+# 새로운 모듈 구조에서 클래스 임포트
+from HSMS import MainAI, MemoryManager
+# 하위 호환성을 위해 기존 방식도 지원
+# from hierarchical import MainAI, MemoryManager
 from config import API_KEY, LOAD_API_KEYS
 
 

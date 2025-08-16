@@ -2,7 +2,10 @@ import discord
 import asyncio
 import os
 from discord.ext import commands
-from hierarchical import MainAI
+# 새로운 모듈 구조에서 클래스 임포트
+from HSMS import MainAI
+# 하위 호환성을 위해 기존 방식도 지원
+# from hierarchical import MainAI
 from config import *
 
 # Discord 봇 설정
