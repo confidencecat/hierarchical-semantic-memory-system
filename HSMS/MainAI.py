@@ -21,27 +21,28 @@ class MainAI:
         need_memory = self._needs_memory_search(user_input) or self.force_search
         
         if self.debug:
-            print(f"🐛 [DEBUG] 기억 검색 필요: {need_memory}")
-            print(f"🐛 [DEBUG] 강제 검색 모드: {self.force_search}")
+            print(f">> [DEBUG] 기억 검색 필요: {need_memory}")
+            print(f">> [DEBUG] 강제 검색 모드: {self.force_search}")
         
         if need_memory:
             # 2. 비동기 병렬 트리 검색
             if self.debug:
-                print(f"🐛 [DEBUG] 메모리 검색 시작...")
+                print(f">> [DEBUG] 메모리 검색 시작...")
             relevant_data = await self._search_memory_async(user_input)
             
             if self.debug:
                 if relevant_data:
-                    print(f"🐛 [DEBUG] 검색 결과: {len(relevant_data)} 글자의 관련 데이터 발견")
-                    print(f"🐛 [DEBUG] 데이터 미리보기: {relevant_data[:100]}...")
+                    print(f">> [DEBUG] 검색 결과: {len(relevant_data)} 글자의 관련 데이터 발견")
+                    print(f">> [DEBUG] 데이터 미리보기: {relevant_data[:100]}...")
                 else:
-                    print(f"🐛 [DEBUG] 검색 결과: 관련 데이터 없음")
+                    print(f">> [DEBUG] 검색 결과: 관련 데이터 없음")
             
             # 3. 응답 생성 (기억 데이터 포함)
             if relevant_data:
                 system_prompt = """당신은 사용자와 자연스럽게 대화하는 AI입니다. 
 과거 기억을 바탕으로 정확하고 도움이 되는 답변을 제공하세요.
-답변은 간결하고 친근하게 1-2문장으로 작성하세요."""
+답변은 간결하고 친근하게 1-2문장으로 작성하세요.
+절대로 이모티콘을 사용하지 마세요."""
                 
                 prompt = f"""과거 기억: {relevant_data}
 
@@ -51,13 +52,15 @@ class MainAI:
             else:
                 system_prompt = """당신은 사용자와 자연스럽게 대화하는 AI입니다. 
 정확하고 도움이 되는 답변을 제공하세요.
-답변은 간결하고 친근하게 1-2문장으로 작성하세요."""
+답변은 간결하고 친근하게 1-2문장으로 작성하세요.
+절대로 이모티콘을 사용하지 마세요."""
                 prompt = user_input
         else:
             # 기억 검색 없이 단순 응답
             system_prompt = """당신은 사용자와 자연스럽게 대화하는 AI입니다. 
 정확하고 도움이 되는 답변을 제공하세요.
-답변은 간결하고 친근하게 1-2문장으로 작성하세요."""
+답변은 간결하고 친근하게 1-2문장으로 작성하세요.
+절대로 이모티콘을 사용하지 마세요."""
             prompt = user_input
         
         # 4. AI 응답 생성
@@ -134,7 +137,7 @@ class MainAI:
             queries.append(node_query)
         
         # 진행 상황 표시
-        print(f"🔍 {len(nodes)}개 노드 검색 중...")
+        print(f"|| 검색중: {len(nodes)}개 노드 분석중...")
         
         # 병렬 AI 호출
         results = await self.ai_manager.call_ai_async_multiple(
@@ -147,7 +150,7 @@ class MainAI:
             if result.strip() == 'True':
                 relevant_nodes.append(nodes[i])
         
-        print(f"✅ {len(relevant_nodes)}개 관련 노드 발견")
+        print(f"|| 완료: {len(relevant_nodes)}개 관련 노드 발견")
         return relevant_nodes
     
     def _check_node_relevance(self, query, node):

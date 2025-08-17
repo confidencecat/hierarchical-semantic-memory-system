@@ -9,7 +9,6 @@ Classes:
     - MemoryManager: 계층적 기억 트리 관리
     - AIManager: AI 호출 및 비동기 처리 관리
     - AuxiliaryAI: 보조 AI (핵심 분류 및 기억 처리)
-    - LoadAI: 로드 AI (레거시 호환용)
     - MainAI: 메인 AI (사용자 대화 처리)
 """
 
@@ -18,7 +17,6 @@ from .MemoryNode import MemoryNode
 from .MemoryManager import MemoryManager
 from .AIManager import AIManager
 from .AuxiliaryAI import AuxiliaryAI
-from .LoadAI import LoadAI
 from .MainAI import MainAI
 
 __all__ = [
@@ -27,7 +25,6 @@ __all__ = [
     'MemoryManager',
     'AIManager',
     'AuxiliaryAI',
-    'LoadAI',
     'MainAI'
 ]
 

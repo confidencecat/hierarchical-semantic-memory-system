@@ -3,8 +3,6 @@ import argparse
 import time
 # 새로운 모듈 구조에서 클래스 임포트
 from HSMS import MainAI, MemoryManager
-# 하위 호환성을 위해 기존 방식도 지원
-# from hierarchical import MainAI, MemoryManager
 from config import API_KEY, LOAD_API_KEYS
 
 
@@ -73,13 +71,13 @@ def show_tree_structure():
         # 트리 구조 문자
         connector = "└── " if is_last else "├── "
         
-        # 노드 타입별 이모지
+        # 노드 타입별 표시
         if node.topic == "ROOT":
-            emoji = "🌳"
+            emoji = "ROOT"
         elif node.coordinates["start"] == -1:  # 카테고리 노드
-            emoji = "📁"
+            emoji = "[CAT]"
         else:  # 대화 노드
-            emoji = "💬"
+            emoji = "[TALK]"
         
         # 좌표 정보
         coord_info = ""
@@ -98,7 +96,7 @@ def show_tree_structure():
         if node.coordinates["start"] != -1 and node.summary and depth < 2:
             summary_prefix = prefix + ("    " if is_last else "│   ")
             summary_text = node.summary[:50] + "..." if len(node.summary) > 50 else node.summary
-            result += f"{summary_prefix}💬 {summary_text}\n"
+            result += f"{summary_prefix}[TALK] {summary_text}\n"
         
         # 자식 노드들 처리
         children_ids = node.children_ids
@@ -116,7 +114,7 @@ def show_tree_structure():
     
     # 통계 정보
     print("=" * 50)
-    print("📊 트리 통계:")
+    print("|| 트리 통계:")
     
     # 카테고리별 노드 수 계산
     categories = {}
@@ -133,7 +131,7 @@ def show_tree_structure():
     print(f"- 카테고리 노드: {len(categories)}")
     
     if categories:
-        print("\n📁 카테고리별 하위 노드:")
+        print("\n|| 카테고리별 하위 노드:")
         for category, count in categories.items():
             if category != "ROOT":
                 print(f"  - {category}: {count}개")
@@ -145,9 +143,9 @@ async def run_test_mode(force_search=False, debug=False):
     """테스트 모드로 실행합니다."""
     print("=== 계층적 의미 기억 시스템 시작 (테스트 모드) ===")
     if force_search:
-        print("⚡ 강제 검색 모드: 모든 대화에서 기억 탐색을 수행합니다.")
+        print("|| 강제 검색 모드: 모든 대화에서 기억 탐색을 수행합니다.")
     if debug:
-        print("🐛 디버그 모드: 상세 정보를 출력합니다.")
+        print(">> 디버그 모드: 상세 정보를 출력합니다.")
     
     main_ai_instance = MainAI(force_search=force_search, debug=debug)
     
@@ -187,6 +185,15 @@ async def run_test_mode(force_search=False, debug=False):
         "과학 실험 재미있는 것들",
         "역사 공부하는 팁",
         
+        # 카테고리 분류 및 분리 실험.
+        "나는 사과를 좋아하는데, 사과가 가장 맛있는것 같아. 하지만 동물들은 사과를 별로 좋아하지 않는다.",
+        "나는 영어의 난해한 부분을 좋아한다. 그리고 과학에서는 발견하지 못한 부분을 좋아한다.",
+        "영어의 문법이 어려운 이유가 무엇인가? 아랍어가 어려운 이유가 무엇인가? 화학이 어려운 이유가 무엇인가?",
+        "나는 대구에 거주한다. 너는 어디에 살고 있지? 어떻게하면 너에 대해서 더 알 수 있는가?",
+        "나는 19살이다. 화학을 공부하지 않아서 어려움이 있다.",
+        "SSD와 HDD에 대해서 궁금하다. 이에 대해서 설명해줘. 다음으로 인공지능의 윤리에 대해서 설명해줘.",
+        "인공지능과 관련된 지식을 공부하기 위해서는 어떻게 해야하는가? 수학을 더 효율적으로 공부하기 위해서는 어떻게 해야하는가?",
+
         # 기억 검색 테스트 시리즈 (비동기 병렬 검색 테스트)
         "저번에 내 이름이 뭐라고 했지?",
         "저번에 나에 대한 소개를 했는데, 나에 대한 정보를 모두 말해봐.",
@@ -197,8 +204,9 @@ async def run_test_mode(force_search=False, debug=False):
         "과일 중에서 내가 부정적으로 생각하는 것들은?",
         "내가 언급한 동물들 모두 말해봐",
         "지금까지 내가 물어본 음식 관련 질문들은?",
-        "나는 사과를 좋아하는데, 사과가 가장 맛있는것 같아. 하지만 동물들은 사과를 별로 좋아하지 않는다.",
-        "나는 영어의 난해한 부분을 좋아한다. 그리고 과학에서는 발견하지 못한 부분을 좋아한다"
+        "저번에 내 나이를 말해줬다. 내 나이는 몇살이지?",
+        "저번에 말한 내가 공부하고 싶어했던 과목 혹은 분야에 대해서 모두 요약해서 설명해줘."
+        
     ]
 
     for i, question in enumerate(test_questions):
@@ -233,11 +241,11 @@ async def run_chat_mode(force_search=False, debug=False):
     """대화형 모드로 실행합니다."""
     print("=== 계층적 의미 기억 시스템 시작 (대화형 모드) ===")
     if force_search:
-        print("⚡ 강제 검색 모드: 모든 대화에서 기억 탐색을 수행합니다.")
+        print("|| 강제 검색 모드: 모든 대화에서 기억 탐색을 수행합니다.")
     else:
-        print("⚡ 효율 모드: 필요한 경우에만 기억 탐색을 수행합니다.")
+        print("|| 효율 모드: 필요한 경우에만 기억 탐색을 수행합니다.")
     if debug:
-        print("🐛 디버그 모드: 상세 정보를 출력합니다.")
+        print(">> 디버그 모드: 상세 정보를 출력합니다.")
     
     main_ai_instance = MainAI(force_search=force_search, debug=debug)
     
@@ -260,21 +268,21 @@ def run_discord_mode(debug=False):
     """Discord 봇 모드로 실행합니다."""
     print("=== Discord 봇 모드 시작 ===")
     if debug:
-        print("🐛 디버그 모드: 상세 정보를 출력합니다.")
+        print(">> 디버그 모드: 상세 정보를 출력합니다.")
     try:
         import hsms_discord
         hsms_discord.set_debug_mode(debug)  # 디버그 모드 설정
         hsms_discord.run_bot()
     except ImportError as e:
-        print(f"❌ Import 오류: {e}")
+        print(f"|| 오류: Import 오류: {e}")
         print("Discord 봇을 실행하려면 hsms_discord.py 파일이 필요합니다.")
         print("또한 discord.py 라이브러리가 설치되어 있는지 확인하세요: pip install discord.py")
     except Exception as e:
-        print(f"❌ Discord 봇 실행 중 오류 발생: {e}")
+        print(f"|| 오류: Discord 봇 실행 중 오류 발생: {e}")
 
 
 def main_ai(prompt='False'):
-    """메인 AI 인스턴스를 생성하고 대화를 처리합니다. (레거시 호환용)"""
+    """메인 AI 인스턴스를 생성하고 대화를 처리합니다."""
     main_ai_instance = MainAI()
     return main_ai_instance.chat(prompt)
 
