@@ -12,23 +12,19 @@ class AuxiliaryAI:
         self.ai_manager = AIManager()
         self.debug = debug  # 디버그 모드 활성화 여부
     
-    async def handle_conversation(self, conversation):
+    async def handle_conversation(self, conversation, conversation_index=None):
         """새로운 대화를 처리하고 적절한 노드에 저장합니다."""
         # 1. 전체 기록에 저장
-        conversation_index = self.memory_manager.save_to_all_memory(conversation)
+        if conversation_index is None:
+            conversation_index = self.memory_manager.save_to_all_memory(conversation)
         
         # 2. 사용자 입력 분석
         user_input = conversation[0]['content']
         
         # 3. AI 기반 다중 카테고리 분류 및 처리
         try:
-            loop = asyncio.get_running_loop()
-            # 디버그 모드일 때는 await로 완료를 기다림
-            if self.debug:
-                await self._process_conversation_with_ai_classification(conversation, conversation_index)
-            else:
-                # 일반 모드일 때는 백그라운드 실행
-                task = loop.create_task(self._process_conversation_with_ai_classification(conversation, conversation_index))
+            # 모든 경우에 await로 완료를 기다림 (force_record 모드에서의 데이터 손실 방지)
+            await self._process_conversation_with_ai_classification(conversation, conversation_index)
         except RuntimeError:
             # 이벤트 루프가 없으면 새로 생성
             await self._process_conversation_with_ai_classification(conversation, conversation_index)
@@ -545,8 +541,9 @@ AI 응답: {ai_response}
         
         topic_prompt = f"사용자: {user_content}\nAI: {ai_content}\n\n위 대화의 핵심 주제를 간결하게 추출하세요."
         
-        # 요약 생성
-        summary_system_prompt = """당신은 대화 내용을 정확하고 포괄적으로 요약하는 전문가입니다.
+        # 요약 생성 - AI 응답 유무에 따라 다른 처리
+        if ai_content.strip():  # AI 응답이 있는 경우
+            summary_system_prompt = """당신은 대화 내용을 정확하고 포괄적으로 요약하는 전문가입니다.
 다음 원칙에 따라 요약하세요:
 
 1. 사용자가 말한 내용과 AI가 응답한 내용을 모두 포함
@@ -557,8 +554,20 @@ AI 응답: {ai_response}
 
 형식: "사용자가 [사용자 내용 요약]에 대해 이야기했고, AI는 [AI 응답 요약]로 답변했다."
 """
-        
-        summary_prompt = f"사용자: {user_content}\nAI: {ai_content}\n\n위 대화를 요약해주세요."
+            summary_prompt = f"사용자: {user_content}\nAI: {ai_content}\n\n위 대화를 요약해주세요."
+        else:  # AI 응답이 없는 경우 (record 모드)
+            summary_system_prompt = """당신은 사용자가 제공한 정보를 정확하고 포괄적으로 요약하는 전문가입니다.
+다음 원칙에 따라 요약하세요:
+
+1. 사용자가 말한 내용의 핵심 정보를 모두 포함
+2. 중요한 정보, 구체적인 세부사항을 놓치지 않기
+3. 정보의 맥락과 의미를 유지
+4. 요약문에는 따옴표("), 백슬래시(\), 작은따옴표(')를 사용하지 않기
+5. 간결하면서도 완전한 정보를 담기
+
+형식: "사용자가 [사용자 내용 요약]에 대해 이야기했다."
+"""
+            summary_prompt = f"사용자: {user_content}\n\n위 사용자 발언의 내용을 요약해주세요."
         
         try:
             # 병렬로 주제와 요약 생성
@@ -612,13 +621,22 @@ AI 응답: {ai_response}
         user_content = conversation[0]['content']
         ai_content = conversation[1]['content']
         
-        prompt = f"""기존 요약: {node.summary}
+        # AI 응답 유무에 따라 다른 프롬프트 생성
+        if ai_content.strip():  # AI 응답이 있는 경우
+            prompt = f"""기존 요약: {node.summary}
 
 새로운 대화:
 사용자: {user_content}
 AI: {ai_content}
 
 기존 요약에 새로운 대화를 통합하여 업데이트된 요약을 작성해주세요."""
+        else:  # AI 응답이 없는 경우 (record 모드)
+            prompt = f"""기존 요약: {node.summary}
+
+새로운 사용자 발언:
+사용자: {user_content}
+
+기존 요약에 새로운 사용자 정보를 통합하여 업데이트된 요약을 작성해주세요."""
         
         new_summary = await self._generate_enhanced_summary_async(node.summary, user_content, ai_content)
         

@@ -8,17 +8,41 @@ from .AIManager import AIManager
 class MainAI:
     """메인 인공지능 - 사용자와 직접 대화하는 주체"""
     
-    def __init__(self, force_search=False, debug=False):
+    def __init__(self, force_search=False, force_record=False, debug=False):
         self.memory_manager = MemoryManager()
         self.auxiliary_ai = AuxiliaryAI(self.memory_manager, debug=debug)
         self.ai_manager = AIManager()
         self.force_search = force_search  # 모든 대화에서 기억 호출 강제 여부
+        self.force_record = force_record  # AI 응답 없이 기록만 수행 여부
         self.debug = debug  # 디버그 모드 활성화 여부
+        
+        # force_search와 force_record는 동시에 사용할 수 없음
+        if self.force_search and self.force_record:
+            raise ValueError("--force-search와 --force-record는 동시에 사용할 수 없습니다.")
     
     async def chat_async(self, user_input):
         """사용자와 채팅합니다 (비동기 버전)."""
         if self.debug:
             print(f"\n>> [MAIN] 대화 시작: '{user_input[:30]}{'...' if len(user_input) > 30 else ''}'")
+        
+        # force_record 모드인 경우 AI 응답 없이 기록만 수행
+        if self.force_record:
+            if self.debug:
+                print(f">>>> [MAIN] 기록 전용 모드 활성화")
+            
+            # AI 응답 없는 대화 생성
+            conversation = [
+                {"role": "user", "content": user_input},
+                {"role": "assistant", "content": ""}  # 빈 응답
+            ]
+            
+            # 기억 시스템에만 저장
+            await self.auxiliary_ai.handle_conversation(conversation)
+            
+            if self.debug:
+                print(f">> [MAIN] 기록 완료")
+            
+            return ""  # 빈 응답 반환
         
         # 1. 기억 필요 여부 확인 (AI 기반 판단)
         if self.force_search:
