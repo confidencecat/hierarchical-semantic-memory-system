@@ -38,90 +38,61 @@ class AuxiliaryAI:
         user_input = conversation[0]['content']
         
         if self.debug:
-            print(f"\n>> [DEBUG] === AI 분류 시작 ===")
-            print(f">> [DEBUG] 사용자 입력: {user_input[:50]}...")
-            print(f">> [DEBUG] 대화 인덱스: {conversation_index}")
+            print(f"\n>> [AUX] AI 분류 시작")
+            print(f">>>> [AUX] 입력: '{user_input[:40]}{'...' if len(user_input) > 40 else ''}'")
+            print(f">>>> [AUX] 대화 인덱스: {conversation_index}")
         
         # 1. 기존 카테고리들과의 관련성 검사 (비동기 병렬)
         existing_categories = await self._get_existing_categories()
         
         if self.debug:
-            print(f">> [DEBUG] 기존 카테고리 수: {len(existing_categories)}")
             if existing_categories:
-                print(f">> [DEBUG] 기존 카테고리들: {list(existing_categories.keys())}")
+                print(f">>>> [AUX] 기존 카테고리 {len(existing_categories)}개: {list(existing_categories.keys())}")
+            else:
+                print(f">>>> [AUX] 기존 카테고리 없음")
         
         if existing_categories:
             # 2. 기존 카테고리들과의 관련성을 AI로 판단
-            if self.debug:
-                print(f">> [DEBUG] 카테고리 관련성 검사 시작...")
             category_relevance = await self._check_category_relevance_async(user_input, existing_categories)
             
             if self.debug:
-                print(f">> [DEBUG] 카테고리 관련성 결과: {category_relevance}")
+                relevant_cats = [cat for cat, rel in category_relevance.items() if rel]
+                if relevant_cats:
+                    print(f">>>> [AUX] 관련 카테고리: {relevant_cats}")
+                else:
+                    print(f">>>> [AUX] 관련 카테고리 없음")
             
             # 3. 관련된 카테고리가 있으면 해당 카테고리별로 대화 내용 분리
             if any(category_relevance.values()):
-                if self.debug:
-                    relevant_cats = [cat for cat, rel in category_relevance.items() if rel]
-                    print(f">> [DEBUG] 관련 카테고리 발견: {relevant_cats}")
                 await self._process_multiple_categories(conversation, conversation_index, category_relevance, existing_categories)
             else:
                 # 4. 기존 카테고리와 관련 없으면 새 카테고리 생성
                 if self.debug:
-                    print(f">> [DEBUG] 기존 카테고리와 관련 없음 - 새 카테고리 생성")
+                    print(f">>>> [AUX] 새 카테고리 생성 필요")
                 await self._create_new_category_and_node(conversation, conversation_index)
         else:
             # 기존 카테고리가 없으면 새 카테고리 생성
             if self.debug:
-                print(f">> [DEBUG] 기존 카테고리 없음 - 첫 번째 카테고리 생성")
+                print(f">>>> [AUX] 첫 번째 카테고리 생성")
             await self._create_new_category_and_node(conversation, conversation_index)
         
         if self.debug:
-            print(f">> [DEBUG] === AI 분류 완료 ===")
-            print(f"|| 최종 저장 결과 요약:")
+            print(f">> [AUX] AI 분류 완료")
             
-            # 현재 트리에서 최근 업데이트된 노드들 찾기
+            # 저장 결과 요약
             recent_nodes = []
-            updated_nodes = []
-            
             for node in self.memory_manager.memory_tree.values():
                 if hasattr(node, 'coordinates'):
-                    # 새로 생성된 노드: start와 end가 모두 현재 conversation_index
                     if (node.coordinates.get('start') == conversation_index and 
                         node.coordinates.get('end') == conversation_index):
                         recent_nodes.append(node)
-                    # 업데이트된 노드: end가 현재 conversation_index
-                    elif node.coordinates.get('end') == conversation_index:
-                        updated_nodes.append(node)
             
             if recent_nodes:
-                print(f">> [DEBUG] 새로 생성된 노드 수: {len(recent_nodes)}")
-                for i, node in enumerate(recent_nodes, 1):
-                    # 부모 노드 찾기 (카테고리)
-                    parent_category = "ROOT"
-                    for parent_node in self.memory_manager.memory_tree.values():
-                        if node.node_id in parent_node.children_ids:
-                            parent_category = parent_node.topic
-                            break
-                    
-                    print(f">> [DEBUG] {i}. [NEW] 카테고리: '{parent_category}' → 노드: '{node.topic}' (ID: {node.node_id})")
-                    
-            if updated_nodes:
-                print(f">> [DEBUG] 업데이트된 노드 수: {len(updated_nodes)}")
-                for i, node in enumerate(updated_nodes, 1):
-                    # 부모 노드 찾기 (카테고리)
-                    parent_category = "ROOT"
-                    for parent_node in self.memory_manager.memory_tree.values():
-                        if node.node_id in parent_node.children_ids:
-                            parent_category = parent_node.topic
-                            break
-                    
-                    print(f">> [DEBUG] {i}. [UPD] 카테고리: '{parent_category}' → 노드: '{node.topic}' (ID: {node.node_id})")
-                    
-            if not recent_nodes and not updated_nodes:
-                print(f"|| 경고: 새로 저장되거나 업데이트된 노드가 없음")
-            
-            print(f">> [DEBUG] === 전체 처리 완료 ===\n")
+                print(f">> [AUX] 생성된 노드: {len(recent_nodes)}개")
+                for node in recent_nodes[:3]:  # 최대 3개만 표시
+                    print(f">>>> [AUX]   - '{node.topic}' ({node.coordinates.get('start')}-{node.coordinates.get('end')})")
+                if len(recent_nodes) > 3:
+                    print(f">>>> [AUX]   ... 외 {len(recent_nodes)-3}개")
     
     async def _get_existing_categories(self):
         """기존에 존재하는 카테고리 노드들을 가져옵니다."""
@@ -161,11 +132,10 @@ class AuxiliaryAI:
             queries.append(prompt)
         
         if self.debug:
-            print(f">> [DEBUG] === AI 카테고리 관련성 판단 요청 ===")
-            print(f">> [DEBUG] 판단할 카테고리 수: {len(categories)}")
+            print(f">> [CATEGORY] 카테고리 관련성 판단 ({len(categories)}개)")
             for name, desc in categories.items():
-                print(f">> [DEBUG]   '{name}': {desc}")
-            print(f"|| AI 관련성 판단 요청 중... (병렬 처리)")
+                print(f">>>> [CATEGORY]   '{name}': {desc[:30]}...")
+            print(f">> [CATEGORY] AI 병렬 판단 시작...")
         
         try:
             # 여러 API 키를 사용한 병렬 처리
@@ -174,10 +144,7 @@ class AuxiliaryAI:
             )
             
             if self.debug:
-                print(f">> [DEBUG] AI 관련성 판단 결과 (병렬):")
-                for i, result in enumerate(results):
-                    print(f">> [DEBUG] {category_names[i]}: {result.strip()}")
-                print(f">> [DEBUG] === 관련성 결과 파싱 ===")
+                print(f">> [CATEGORY] 병렬 판단 완료")
             
             # 결과 파싱
             relevance = {}
@@ -185,14 +152,12 @@ class AuxiliaryAI:
                 category_name = category_names[i]
                 value = result.strip().lower()
                 relevance[category_name] = value in ['true', '참', 'yes']
-                if self.debug:
-                    status = "|| 관련있음" if relevance[category_name] else "|| 관련없음"
-                    print(f">> [DEBUG] '{category_name}': {status}")
+                if self.debug and relevance[category_name]:
+                    print(f">>>> [CATEGORY] 관련: '{category_name}'")
             
             if self.debug:
-                print(f">> [DEBUG] === 최종 관련성 결과 ===")
                 relevant_count = sum(relevance.values())
-                print(f">> [DEBUG] 관련된 카테고리 수: {relevant_count}/{len(categories)}")
+                print(f">> [CATEGORY] 최종 결과: {relevant_count}/{len(categories)}개 관련")
             
             return relevance
         except Exception as e:
@@ -247,30 +212,34 @@ class AuxiliaryAI:
             return
         
         if self.debug:
-            print(f"|| 완료: '{category_name}' 카테고리 노드 발견 (ID: {category_node.node_id})")
+            print(f">> 완료: '{category_name}' 카테고리 노드 발견 (ID: {category_node.node_id})")
         
         user_input = conversation[0]['content']
         
         if self.debug:
-            print(f"|| 검색중: 새로운 주제인지 AI로 판단 중...")
+            print(f">> 검색중: 새로운 주제인지 AI로 판단 중...")
         
         # 새로운 주제인지 판단
         if await self._check_for_new_topic_async(category_node, user_input):
             # 새로운 노드 생성
             if self.debug:
-                print(f"|| 완료: 새로운 주제로 판단 - 새 노드 생성")
+                print(f">> 완료: 새로운 주제로 판단 - 새 노드 생성")
             new_node = await self._create_new_node_async(category_node, user_input, conversation, conversation_index)
-            self.update_node_coordinates(new_node.node_id, conversation_index, conversation_index)
+            # 새로운 방식: conversation_indices에 대화 추가
+            new_node.add_conversation(conversation_index)
+            # 부모 카테고리에도 대화 추가
+            category_node.add_conversation(conversation_index)
+            self.memory_manager.save_tree()
             if self.debug:
-                print(f"|| 새 노드 생성 완료:")
+                print(f">> 새 노드 생성 완료:")
                 print(f">> [DEBUG]   노드 ID: {new_node.node_id}")
                 print(f">> [DEBUG]   주제: '{new_node.topic}'")
                 print(f">> [DEBUG]   부모: '{category_name}' 카테고리")
-                print(f">> [DEBUG]   좌표: {new_node.coordinates}")
+                print(f">> [DEBUG]   대화 인덱스: {new_node.conversation_indices}")
         else:
             # 기존 노드에 추가
             if self.debug:
-                print(f"|| 기존 주제로 판단 - 기존 노드 또는 새 노드에 추가")
+                print(f">> 기존 주제로 판단 - 기존 노드 또는 새 노드에 추가")
             relevant_child = await self._find_relevant_child_node_async(category_node, user_input)
             if relevant_child:
                 if self.debug:
@@ -279,19 +248,23 @@ class AuxiliaryAI:
                     print(f">> [DEBUG]   노드 주제: '{relevant_child.topic}'")
                 await self.update_node_and_parents(relevant_child, conversation, conversation_index)
                 if self.debug:
-                    print(f"|| 완료: 노드 업데이트 완료")
+                    print(f">> 완료: 노드 업데이트 완료")
             else:
                 # 관련 하위 노드가 없으면 새로운 노드 생성
                 if self.debug:
                     print(f"|| 해결: 관련 하위 노드를 찾을 수 없음 - 새 노드 생성")
                 new_node = await self._create_new_node_async(category_node, user_input, conversation, conversation_index)
-                self.update_node_coordinates(new_node.node_id, conversation_index, conversation_index)
+                # 새로운 방식: conversation_indices에 대화 추가
+                new_node.add_conversation(conversation_index)
+                # 부모 카테고리에도 대화 추가
+                category_node.add_conversation(conversation_index)
+                self.memory_manager.save_tree()
                 if self.debug:
                     print(f"|| 새 노드 생성 완료:")
                     print(f">> [DEBUG]   노드 ID: {new_node.node_id}")
                     print(f">> [DEBUG]   주제: '{new_node.topic}'")
                     print(f">> [DEBUG]   부모: '{category_name}' 카테고리")
-                    print(f">> [DEBUG]   좌표: {new_node.coordinates}")
+                    print(f">> [DEBUG]   대화 인덱스: {new_node.conversation_indices}")
         
         if self.debug:
             print(f">> [DEBUG] === '{category_name}' 카테고리 처리 완료 ===\n")
@@ -429,7 +402,7 @@ AI 응답: {ai_response}
         category_name = await self._generate_category_name_async(user_input)
         
         if self.debug:
-            print(f"|| 완료: 생성된 카테고리명: '{category_name}'")
+            print(f">> 완료: 생성된 카테고리명: '{category_name}'")
         
         # 새 카테고리 노드 생성
         root_node = self.memory_manager.get_root_node()
@@ -442,14 +415,20 @@ AI 응답: {ai_response}
         self.memory_manager.add_node(category_node, root_node.node_id)
         
         if self.debug:
-            print(f"|| 완료: 카테고리 노드 생성 완료 (ID: {category_node.node_id})")
+            print(f">> 완료: 카테고리 노드 생성 완료 (ID: {category_node.node_id})")
         
         # 카테고리 하위에 실제 대화 노드 생성
         new_node = await self._create_new_node_async(category_node, user_input, conversation, conversation_index)
-        self.update_node_coordinates(new_node.node_id, conversation_index, conversation_index)
+        # 새로운 방식: conversation_indices에 대화 추가
+        new_node.add_conversation(conversation_index)
+        # 부모 카테고리에도 대화 추가
+        category_node.add_conversation(conversation_index)
+        self.memory_manager.save_tree()
         
         if self.debug:
-            print(f"|| 완료: 하위 노드 생성 완료 (ID: {new_node.node_id}, 주제: '{new_node.topic}')")
+            print(f">> 완료: 하위 노드 생성 완료 (ID: {new_node.node_id}, 주제: '{new_node.topic}')")
+            print(f">>>> [DEBUG] 카테고리 대화 목록: {category_node.conversation_indices}")
+            print(f">>>> [DEBUG] 노드 대화 목록: {new_node.conversation_indices}")
     
     async def _generate_category_name_async(self, user_input):
         """AI를 사용하여 새로운 카테고리명을 생성합니다."""
@@ -533,7 +512,7 @@ AI 응답: {ai_response}
         
         try:
             results = await self.ai_manager.call_ai_async_multiple(
-                relevance_queries, system_prompt, fine=ISSAMEFINE
+                relevance_queries, system_prompt
             )
             
             # 가장 관련성이 높은 노드 반환
@@ -643,17 +622,20 @@ AI: {ai_content}
         
         new_summary = await self._generate_enhanced_summary_async(node.summary, user_content, ai_content)
         
-        # 좌표 업데이트
-        new_coordinates = {
-            "start": node.coordinates["start"],
-            "end": conversation_index
-        }
+        # 새로운 방식: conversation_indices에 대화 추가
+        node.add_conversation(conversation_index)
         
         self.memory_manager.update_node(
             node.node_id,
-            summary=new_summary,
-            coordinates=new_coordinates
+            summary=new_summary
         )
+        
+        # 부모 카테고리에도 대화 추가
+        if node.parent_id:
+            parent_node = self.memory_manager.get_node(node.parent_id)
+            if parent_node:
+                parent_node.add_conversation(conversation_index)
+                await self.update_parent_summary(parent_node, node)
         
         # 부모 노드들 재귀적으로 업데이트
         if node.parent_id:

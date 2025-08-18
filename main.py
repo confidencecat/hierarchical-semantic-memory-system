@@ -79,9 +79,20 @@ def show_tree_structure():
         else:  # 대화 노드
             emoji = "[TALK]"
         
-        # 좌표 정보
+        # 좌표 정보 - 새로운 conversation_indices 방식 사용
         coord_info = ""
-        if node.coordinates["start"] >= 0:
+        if hasattr(node, 'conversation_indices') and node.conversation_indices:
+            # 새로운 방식: conversation_indices 표시
+            if len(node.conversation_indices) == 1:
+                coord_info = f" (대화: {node.conversation_indices[0]})"
+            elif len(node.conversation_indices) <= 3:
+                coord_info = f" (대화: {', '.join(map(str, node.conversation_indices))})"
+            else:
+                # 많은 대화가 있는 경우 축약 표시
+                first_few = node.conversation_indices[:2]
+                coord_info = f" (대화: {', '.join(map(str, first_few))}...+{len(node.conversation_indices)-2}개)"
+        elif node.coordinates["start"] >= 0:
+            # 기존 방식 (하위 호환성)
             if node.coordinates["start"] == node.coordinates["end"]:
                 coord_info = f" (대화: {node.coordinates['start']})"
             else:
