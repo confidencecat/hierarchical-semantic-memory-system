@@ -221,3 +221,126 @@ class MemoryManager:
                     issues.append(f"노드 {node_id}의 부모 {node.parent_id}가 존재하지 않습니다.")
         
         return len(issues) == 0, issues
+    
+    def insert_group_above(self, existing_child_id, group_topic, group_summary):
+        """기존 자식 노드 위에 그룹 노드를 삽입합니다."""
+        existing_node = self.get_node(existing_child_id)
+        if not existing_node:
+            return None
+        
+        old_parent_id = existing_node.parent_id
+        old_parent = self.get_node(old_parent_id)
+        if not old_parent:
+            return None
+        
+        # 새 그룹 노드 생성
+        group_node = MemoryNode(
+            topic=group_topic,
+            summary=group_summary,
+            parent_id=old_parent_id,
+            coordinates={"start": -1, "end": -1}  # 카테고리/그룹 노드
+        )
+        
+        # 그룹 노드를 트리에 추가
+        self.memory_tree[group_node.node_id] = group_node
+        
+        # 기존 부모의 자식 목록에서 기존 노드를 제거하고 그룹 노드 추가
+        if existing_child_id in old_parent.children_ids:
+            old_parent.children_ids.remove(existing_child_id)
+        old_parent.children_ids.append(group_node.node_id)
+        
+        # 기존 노드의 부모를 그룹 노드로 변경
+        existing_node.parent_id = group_node.node_id
+        group_node.children_ids.append(existing_child_id)
+        
+        return group_node.node_id
+    
+    def reparent_node(self, node_id, new_parent_id):
+        """노드를 다른 부모로 재배치합니다."""
+        node = self.get_node(node_id)
+        new_parent = self.get_node(new_parent_id)
+        
+        if not node or not new_parent or node_id == self.root_node_id:
+            return False
+        
+        old_parent_id = node.parent_id
+        old_parent = self.get_node(old_parent_id)
+        
+        # 기존 부모에서 제거
+        if old_parent and node_id in old_parent.children_ids:
+            old_parent.children_ids.remove(node_id)
+        
+        # 새 부모에 추가
+        node.parent_id = new_parent_id
+        new_parent.children_ids.append(node_id)
+        
+        return True
+    
+    def replace_child(self, parent_id, old_child_id, new_child_id):
+        """부모의 자식을 교체합니다."""
+        parent = self.get_node(parent_id)
+        if not parent or old_child_id not in parent.children_ids:
+            return False
+        
+        # 자식 목록에서 교체
+        child_index = parent.children_ids.index(old_child_id)
+        parent.children_ids[child_index] = new_child_id
+        
+        # 새 자식의 부모 설정
+        new_child = self.get_node(new_child_id)
+        if new_child:
+            new_child.parent_id = parent_id
+        
+        return True
+    
+    def create_category_node(self, topic, summary, parent_id):
+        """카테고리 노드를 생성합니다."""
+        node = MemoryNode(
+            topic=topic,
+            summary=summary,
+            parent_id=parent_id,
+            coordinates={"start": -1, "end": -1}  # 카테고리 표시
+        )
+        return node
+    
+    def create_conversation_node(self, topic, summary, parent_id, conversation_index):
+        """대화 노드(리프)를 생성합니다."""
+        node = MemoryNode(
+            topic=topic,
+            summary=summary,
+            parent_id=parent_id,
+            coordinates={"start": conversation_index, "end": conversation_index}
+        )
+        node.conversation_indices = [conversation_index]
+        return node
+    
+    def merge_leaf_nodes(self, main_node_id, *other_node_ids):
+        """여러 리프 노드를 하나로 병합합니다."""
+        main_node = self.get_node(main_node_id)
+        if not main_node:
+            return False
+        
+        for other_id in other_node_ids:
+            other_node = self.get_node(other_id)
+            if not other_node:
+                continue
+            
+            # 대화 인덱스 병합
+            if hasattr(other_node, 'conversation_indices'):
+                if not hasattr(main_node, 'conversation_indices'):
+                    main_node.conversation_indices = []
+                main_node.conversation_indices.extend(other_node.conversation_indices)
+            
+            # 부모에서 other_node 제거
+            parent = self.get_node(other_node.parent_id)
+            if parent and other_id in parent.children_ids:
+                parent.children_ids.remove(other_id)
+            
+            # 트리에서 제거
+            del self.memory_tree[other_id]
+        
+        # 중복 제거 및 정렬
+        if hasattr(main_node, 'conversation_indices'):
+            main_node.conversation_indices = sorted(list(set(main_node.conversation_indices)))
+        
+        return True

@@ -4,6 +4,7 @@ import re
 from collections import defaultdict
 from .AIManager import AIManager
 from .MemoryNode import MemoryNode
+from config import NODE_SIMILARITY_FINE
 
 
 class TreeCleanupEngine:
@@ -158,9 +159,12 @@ class TreeCleanupEngine:
         return clusters
     
     async def _build_similarity_matrix(self, nodes):
-        """노드 간 유사도 매트릭스를 구축합니다."""
+        """노드 간 유사도 매트릭스를 구축합니다 (Fine Tuning 개선)."""
         n = len(nodes)
         matrix = [[False for _ in range(n)] for _ in range(n)]
+        
+        if self.debug:
+            print(f">>>> 유사도 매트릭스 구축: {n}개 노드, {n*(n-1)//2}개 쌍")
         
         # 모든 노드 쌍에 대해 유사도 검사
         queries = []
@@ -168,20 +172,35 @@ class TreeCleanupEngine:
         
         for i in range(n):
             for j in range(i+1, n):
-                query = f"""노드1: {nodes[i].topic}
-요약1: {nodes[i].summary[:100]}
-노드2: {nodes[j].topic}  
-요약2: {nodes[j].summary[:100]}
+                # 개선된 프롬프트 (더 상세한 정보 제공)
+                query = f"""노드1: "{nodes[i].topic}"
+설명1: {nodes[i].summary[:150] if nodes[i].summary else '요약 없음'}
 
-이 두 노드가 같은 그룹으로 묶일 만큼 유사한가요?"""
+노드2: "{nodes[j].topic}"  
+설명2: {nodes[j].summary[:150] if nodes[j].summary else '요약 없음'}
+
+이 두 노드가 같은 상위 그룹으로 묶일 만큼 유사한가요?"""
                 queries.append(query)
                 pairs.append((i, j))
         
         if queries:
-            system_prompt = """두 노드가 같은 상위 그룹으로 묶일 만큼 유사한지 판단하세요.
-유사하면 "True", 다르면 "False"로만 답하세요."""
+            # 간단한 시스템 프롬프트 (Fine Tuning 데이터는 call_ai_async_multiple에서 처리)
+            system_prompt = """두 노드가 같은 상위 그룹으로 묶일 만큼 유사한지 판단하라.
+- 같은 주제 영역이나 개념적으로 연관성이 있으면 "True"
+- 완전히 다른 영역이거나 관련성이 없으면 "False"
+- 오직 "True" 또는 "False"로만 답하라."""
             
-            results = await self.ai_manager.call_ai_async_multiple(queries, system_prompt)
+            if self.debug:
+                print(f">>>> AI 병렬 유사도 판단 시작: {len(queries)}개 쌍")
+            
+            # NODE_SIMILARITY_FINE을 Fine Tuning 데이터로 활용
+            results = await self.ai_manager.call_ai_async_multiple(
+                queries, system_prompt, fine=NODE_SIMILARITY_FINE
+            )
+            
+            if self.debug:
+                true_count = sum(1 for r in results if r and r.strip().lower() == 'true')
+                print(f">>>> 유사도 판단 완료: {true_count}/{len(results)}개 유사 쌍 발견")
             
             # 결과를 매트릭스에 반영
             for idx, result in enumerate(results):
@@ -250,8 +269,8 @@ class TreeCleanupEngine:
     
     async def _generate_group_name(self, topics):
         """주제들을 기반으로 그룹명을 생성합니다."""
-        system_prompt = """주어진 주제들을 포괄하는 적절한 그룹명을 생성하세요.
-IMPORTANT: 오직 그룹명만 답변하세요. 설명이나 다른 텍스트는 포함하지 마세요.
+        system_prompt = """주어진 주제들을 포괄하는 적절한 그룹명을 생성하라.
+중요: 오직 그룹명만 답변하라. 설명이나 다른 텍스트는 포함하지 마라.
 - 2-8자의 간결한 한국어 단어
 - 예: "과학", "음식", "언어", "경제", "철학"
 - 주제들의 공통점을 반영한 핵심 단어"""
@@ -359,7 +378,7 @@ IMPORTANT: 오직 그룹명만 답변하세요. 설명이나 다른 텍스트는
     
     async def _generate_group_summary(self, nodes):
         """그룹 노드의 요약을 생성합니다."""
-        system_prompt = """주어진 노드들의 공통 주제와 내용을 요약하세요.
+        system_prompt = """주어진 노드들의 공통 주제와 내용을 요약하라.
 - 1-2문장으로 간결하게
 - 하위 노드들의 공통점 강조"""
         
@@ -458,7 +477,7 @@ IMPORTANT: 오직 그룹명만 답변하세요. 설명이나 다른 텍스트는
     
     async def _generate_merged_summary(self, target_node, source_node):
         """병합된 노드의 요약을 생성합니다."""
-        system_prompt = """두 노드가 병합되었습니다. 통합된 요약을 작성하세요.
+        system_prompt = """두 노드가 병합되었다. 통합된 요약을 작성하라.
 - 두 노드의 핵심 내용 모두 포함
 - 1-2문장으로 간결하게"""
         
@@ -563,7 +582,7 @@ IMPORTANT: 오직 그룹명만 답변하세요. 설명이나 다른 텍스트는
     
     async def _generate_leaf_merge_summary(self, merged_node):
         """병합된 리프 노드의 요약을 생성합니다."""
-        system_prompt = """여러 대화가 병합된 노드의 요약을 작성하세요.
+        system_prompt = """여러 대화가 병합된 노드의 요약을 작성하라.
 - 모든 대화의 핵심 내용 포함
 - "여러 대화가 포함됨"을 명시"""
         
@@ -603,11 +622,11 @@ IMPORTANT: 오직 그룹명만 답변하세요. 설명이나 다른 텍스트는
     
     async def _generate_improved_name(self, node):
         """개선된 노드 이름을 생성합니다."""
-        system_prompt = """노드의 요약과 하위 내용을 바탕으로 더 적절한 이름을 제안하세요.
+        system_prompt = """노드의 요약과 하위 내용을 바탕으로 더 적절한 이름을 제안하라.
 - 2-8자의 간결한 한국어
 - 현재 이름보다 더 명확하고 포괄적인 표현
 
-IMPORTANT: 오직 그룹명만 답변하세요. 설명이나 추가 텍스트 없이 그룹명만 출력하세요."""
+IMPORTANT: 오직 그룹명만 답변하라. 설명이나 추가 텍스트 없이 그룹명만 출력하라."""
         
         # 하위 노드들의 주제도 참고
         child_topics = []

@@ -1,7 +1,7 @@
 import asyncio
 import re
 from config import (API_KEY, LOAD_API_KEYS, GEMINI_MODEL, CATEGORY_RELEVANCE_FINE, 
-                   NEW_TOPIC_FINE, CONVERSATION_SEPARATION_FINE)
+                   NEW_TOPIC_FINE, CONVERSATION_SEPARATION_FINE, GROUP_SIMILARITY_FINE)
 from .AIManager import AIManager
 from .MemoryNode import MemoryNode
 
@@ -206,9 +206,64 @@ class AuxiliaryAI:
     
     async def _create_group_structure(self, conversation, conversation_index, relevant_categories, user_input):
         """여러 카테고리를 위한 그룹 구조를 생성합니다."""
-        # 임시로 첫 번째 카테고리에 추가 (추후 개선 가능)
+        if self.debug:
+            print(f">> [DYNAMIC] AB 그룹 생성 시작")
+            print(f">>>> [DYNAMIC] 관련 카테고리들: {relevant_categories}")
+        
+        # 두 카테고리 간의 유사도 판단
+        if len(relevant_categories) >= 2:
+            category_a = relevant_categories[0]
+            category_b = relevant_categories[1]
+            
+            # 카테고리 노드 찾기
+            category_a_node = self._find_category_node_by_name(category_a)
+            category_b_node = self._find_category_node_by_name(category_b)
+            
+            if category_a_node and category_b_node:
+                # AI로 유사도 판단
+                should_group = await self._check_category_similarity(category_a_node, category_b_node)
+                
+                if should_group:
+                    if self.debug:
+                        print(f">>>> [DYNAMIC] '{category_a}'와 '{category_b}' 그룹화 결정")
+                    
+                    # AB 그룹 생성
+                    group_name = await self._generate_group_name_for_categories(category_a, category_b)
+                    group_summary = await self._generate_group_summary_for_categories(category_a_node, category_b_node)
+                    
+                    # 깊이 검증
+                    if self._can_create_group_above(category_a_node.node_id):
+                        # A 카테고리 위에 AB 그룹 생성
+                        group_node_id = self.memory_manager.insert_group_above(
+                            category_a_node.node_id, group_name, group_summary
+                        )
+                        
+                        if group_node_id:
+                            # B 카테고리를 AB 그룹으로 이동
+                            self.memory_manager.reparent_node(category_b_node.node_id, group_node_id)
+                            
+                            # 새 대화를 적절한 카테고리에 추가
+                            target_category = await self._select_target_category_in_group(
+                                user_input, [category_a, category_b]
+                            )
+                            await self._add_to_existing_category(conversation, conversation_index, target_category, user_input)
+                            
+                            if self.debug:
+                                print(f">>>> [DYNAMIC] AB 그룹 '{group_name}' 생성 완료")
+                                print(f">>>> [DYNAMIC] 대화를 '{target_category}' 카테고리에 추가")
+                            return
+                    else:
+                        if self.debug:
+                            print(f">>>> [DYNAMIC] 깊이 제한으로 그룹 생성 불가, 리프 병합 시도")
+                        # 깊이 제한으로 그룹 생성 불가 시 리프 병합
+                        await self._handle_depth_limit_with_merge(conversation, conversation_index, relevant_categories, user_input)
+                        return
+        
+        # 그룹화 불가능한 경우 기존 방식으로 처리
+        if self.debug:
+            print(f">>>> [DYNAMIC] 그룹화 불가능, 첫 번째 카테고리에 추가")
         first_category = relevant_categories[0]
-        await self._add_to_existing_category(conversation, conversation_index, first_category, "")
+        await self._add_to_existing_category(conversation, conversation_index, first_category, user_input)
     
     async def _process_conversation_with_ai_classification(self, conversation, conversation_index):
         user_input = conversation[0]['content']
@@ -290,12 +345,12 @@ class AuxiliaryAI:
     
     async def _check_category_relevance_async(self, user_input, categories):
         """기존 카테고리들과 사용자 입력의 관련성을 AI로 비동기 병렬 판단합니다."""
-        system_prompt = """당신은 사용자의 대화 내용이 특정 카테고리와 관련이 있는지 판단하는 전문가입니다.
+        system_prompt = """사용자의 대화 내용이 특정 카테고리와 관련이 있는지 판단하라.
 
-사용자의 대화를 분석하고, 주어진 카테고리와의 관련성을 정확히 판단하세요.
-단순히 단어가 포함되어 있다고 관련이 있는 것이 아니라, 실제 대화의 주제와 내용을 고려해야 합니다.
+사용자의 대화를 분석하고, 주어진 카테고리와의 관련성을 정확히 판단하라.
+단순히 단어가 포함되어 있다고 관련이 있는 것이 아니라, 실제 대화의 주제와 내용을 고려하라.
 
-반드시 "True" (관련 있음) 또는 "False" (관련 없음)로만 답하세요."""
+반드시 "True" (관련 있음) 또는 "False" (관련 없음)로만 답하라."""
         
         # 각 카테고리별로 개별 쿼리 생성 (병렬 처리용)
         queries = []
@@ -498,10 +553,10 @@ class AuxiliaryAI:
     
     async def _separate_conversation_by_categories(self, user_input, ai_response, categories):
         """대화 내용을 카테고리별로 분리합니다."""
-        system_prompt = """당신은 대화 내용을 주제별로 분리하는 전문가입니다.
+        system_prompt = """대화 내용을 주제별로 분리하라.
 
-사용자의 대화와 AI의 응답을 분석하여, 각 카테고리와 관련된 부분만을 추출하세요.
-한 대화에서 여러 주제가 다뤄질 수 있으므로, 각 카테고리에 해당하는 내용만 정확히 분리하세요.
+사용자의 대화와 AI의 응답을 분석하여, 각 카테고리와 관련된 부분만을 추출하라.
+한 대화에서 여러 주제가 다뤄질 수 있으므로, 각 카테고리에 해당하는 내용만 정확히 분리하라.
 
 출력 형식:
 카테고리명:
@@ -519,7 +574,7 @@ AI: [해당 카테고리와 관련된 AI 응답 부분]
 사용자 발언: {user_input}
 AI 응답: {ai_response}
 
-위 대화를 각 카테고리별로 관련된 부분만 분리하여 출력하세요."""
+위 대화를 각 카테고리별로 관련된 부분만 분리하여 출력하라."""
         
         if self.debug:
             print(f">> [DEBUG] === AI에게 대화 분리 요청 ===")
@@ -616,10 +671,10 @@ AI 응답: {ai_response}
     
     async def _generate_category_name_async(self, user_input):
         """AI를 사용하여 새로운 카테고리명을 생성합니다."""
-        system_prompt = """당신은 대화 내용을 분석하여 적절한 카테고리명을 생성하는 전문가입니다.
+        system_prompt = """대화 내용을 분석하여 적절한 카테고리명을 생성하라.
 
-사용자의 대화 내용을 분석하고, 이 대화가 속할 수 있는 가장 적절한 카테고리명을 생성하세요.
-카테고리명은 간결하고 포괄적이어야 하며, 2-8글자 정도로 작성하세요.
+사용자의 대화 내용을 분석하고, 이 대화가 속할 수 있는 가장 적절한 카테고리명을 생성하라.
+카테고리명은 간결하고 포괄적이어야 하며, 2-8글자 정도로 작성하라.
 
 예시:
 - 컴퓨터, SSD에 대한 대화 → "기술"
@@ -627,9 +682,9 @@ AI 응답: {ai_response}
 - 게임에 대한 대화 → "게임"
 - 여행 이야기 → "여행"
 
-단 하나의 카테고리명만 출력하세요."""
+단 하나의 카테고리명만 출력하라."""
         
-        prompt = f"사용자 대화: {user_input}\n\n이 대화에 적합한 카테고리명을 생성하세요."
+        prompt = f"사용자 대화: {user_input}\n\n이 대화에 적합한 카테고리명을 생성하라."
         
         try:
             result = await self.ai_manager.call_ai_async_single(prompt, system_prompt)
@@ -651,8 +706,8 @@ AI 응답: {ai_response}
             print(f">> [DEBUG]   부모 카테고리: '{parent_node.topic}'")
             print(f">> [DEBUG]   사용자 입력: {user_input[:100]}{'...' if len(user_input) > 100 else ''}")
         
-        system_prompt = """당신은 새로운 대화가 기존 노드의 하위 주제인지, 완전히 새로운 주제인지 판단하는 전문가입니다.
-반드시 "True" (새로운 주제) 또는 "False" (기존 주제의 하위)로만 답하세요."""
+        system_prompt = """새로운 대화가 기존 노드의 하위 주제인지, 완전히 새로운 주제인지 판단하라.
+반드시 "True" (새로운 주제) 또는 "False" (기존 주제의 하위)로만 답하라."""
         
         prompt = f"부모 노드 주제: {parent_node.topic}\n새로운 대화: {user_input}"
         
@@ -690,9 +745,9 @@ AI 응답: {ai_response}
             query = f"사용자 질문: {user_input}\n기존 노드 주제: {node.topic}\n기존 노드 요약: {node.summary[:200]}"
             relevance_queries.append(query)
         
-        system_prompt = """당신은 사용자 질문과 기존 노드의 관련성을 판단하는 전문가입니다.
-주제와 요약을 보고 사용자 질문과 관련이 있는지 판단하세요.
-"True" (관련 있음) 또는 "False" (관련 없음)로만 답하세요."""
+        system_prompt = """사용자 질문과 기존 노드의 관련성을 판단하라.
+주제와 요약을 보고 사용자 질문과 관련이 있는지 판단하라.
+"True" (관련 있음) 또는 "False" (관련 없음)로만 답하라."""
         
         try:
             results = await self.ai_manager.call_ai_async_multiple(
@@ -715,9 +770,9 @@ AI 응답: {ai_response}
         ai_content = conversation[1]['content']
         
         # AI 기반 주제 추출
-        topic_system_prompt = """당신은 대화에서 핵심 주제를 추출하는 전문가입니다.
-사용자의 입력과 AI의 응답을 분석하여 간결하고 명확한 주제명을 생성하세요.
-주제명은 2-10글자 정도로 간단하고 구체적이어야 합니다.
+        topic_system_prompt = """대화에서 핵심 주제를 추출하라.
+사용자의 입력과 AI의 응답을 분석하여 간결하고 명확한 주제명을 생성하라.
+주제명은 2-10글자 정도로 간단하고 구체적이어야 한다.
 
 예시:
 - 사과에 대한 대화 → "사과"
@@ -725,14 +780,14 @@ AI 응답: {ai_response}
 - 인류 역사 → "인류 역사"
 - 학교 이야기 → "학교"
 
-대화의 실제 내용과 맥락을 정확히 반영하는 주제명을 만드세요."""
+대화의 실제 내용과 맥락을 정확히 반영하는 주제명을 만들라."""
         
-        topic_prompt = f"사용자: {user_content}\nAI: {ai_content}\n\n위 대화의 핵심 주제를 간결하게 추출하세요."
+        topic_prompt = f"사용자: {user_content}\nAI: {ai_content}\n\n위 대화의 핵심 주제를 간결하게 추출하라."
         
         # 요약 생성 - AI 응답 유무에 따라 다른 처리
         if ai_content.strip():  # AI 응답이 있는 경우
-            summary_system_prompt = """당신은 대화 내용을 정확하고 포괄적으로 요약하는 전문가입니다.
-다음 원칙에 따라 요약하세요:
+            summary_system_prompt = """대화 내용을 정확하고 포괄적으로 요약하라.
+다음 원칙에 따라 요약하라:
 
 1. 사용자가 말한 내용과 AI가 응답한 내용을 모두 포함
 2. 핵심 주제, 중요한 정보, 구체적인 세부사항을 놓치지 않기
@@ -742,10 +797,10 @@ AI 응답: {ai_response}
 
 형식: "사용자가 [사용자 내용 요약]에 대해 이야기했고, AI는 [AI 응답 요약]로 답변했다."
 """
-            summary_prompt = f"사용자: {user_content}\nAI: {ai_content}\n\n위 대화를 요약해주세요."
+            summary_prompt = f"사용자: {user_content}\nAI: {ai_content}\n\n위 대화를 요약하라."
         else:  # AI 응답이 없는 경우 (record 모드)
-            summary_system_prompt = """당신은 사용자가 제공한 정보를 정확하고 포괄적으로 요약하는 전문가입니다.
-다음 원칙에 따라 요약하세요:
+            summary_system_prompt = """사용자가 제공한 정보를 정확하고 포괄적으로 요약하라.
+다음 원칙에 따라 요약하라:
 
 1. 사용자가 말한 내용의 핵심 정보를 모두 포함
 2. 중요한 정보, 구체적인 세부사항을 놓치지 않기
@@ -755,7 +810,7 @@ AI 응답: {ai_response}
 
 형식: "사용자가 [사용자 내용 요약]에 대해 이야기했다."
 """
-            summary_prompt = f"사용자: {user_content}\n\n위 사용자 발언의 내용을 요약해주세요."
+            summary_prompt = f"사용자: {user_content}\n\n위 사용자 발언의 내용을 요약하라."
         
         try:
             # 병렬로 주제와 요약 생성
@@ -794,8 +849,8 @@ AI 응답: {ai_response}
     async def update_node_and_parents(self, node, conversation, conversation_index):
         """노드와 부모 노드들을 업데이트합니다."""
         # 현재 노드 요약 업데이트 (인라인)
-        system_prompt = """당신은 기존 대화 요약에 새로운 대화 내용을 통합하는 전문가입니다.
-다음 원칙에 따라 요약을 업데이트하세요:
+        system_prompt = """기존 대화 요약에 새로운 대화 내용을 통합하라.
+다음 원칙에 따라 요약을 업데이트하라:
 
 1. 기존 요약의 내용을 유지하면서 새로운 내용을 자연스럽게 통합
 2. 사용자 발언과 AI 응답을 모두 포함
@@ -803,7 +858,7 @@ AI 응답: {ai_response}
 4. 새로운 정보나 주제 전개를 명확히 반영
 5. 요약문에는 따옴표("), 백슬래시(\), 작은따옴표(')를 사용하지 않기
 
-최종 요약은 전체 대화 흐름을 이해할 수 있도록 작성하세요.
+최종 요약은 전체 대화 흐름을 이해할 수 있도록 작성하라.
 """
         
         user_content = conversation[0]['content']
@@ -851,8 +906,8 @@ AI: {ai_content}
     
     async def update_summary(self, current_summary, new_conversation):
         """기존 요약에 새로운 대화를 통합합니다."""
-        system_prompt = """당신은 기존 대화 요약에 새로운 대화 내용을 통합하는 전문가입니다.
-다음 원칙에 따라 요약을 업데이트하세요:
+        system_prompt = """기존 대화 요약에 새로운 대화 내용을 통합하라.
+다음 원칙에 따라 요약을 업데이트하라:
 
 1. 기존 요약의 내용을 유지하면서 새로운 내용을 자연스럽게 통합
 2. 사용자 발언과 AI 응답을 모두 포함
@@ -860,7 +915,7 @@ AI: {ai_content}
 4. 새로운 정보나 주제 전개를 명확히 반영
 5. 요약문에는 따옴표("), 백슬래시(\), 작은따옴표(')를 사용하지 않기
 
-최종 요약은 전체 대화 흐름을 이해할 수 있도록 작성하세요.
+최종 요약은 전체 대화 흐름을 이해할 수 있도록 작성하라.
 """
         
         user_content = new_conversation[0]['content']
@@ -882,12 +937,12 @@ AI: {ai_content}
         if parent_node.coordinates["start"] == -1 and parent_node.coordinates["end"] == -1:
             return
         
-        system_prompt = """당신은 부모 노드의 요약을 업데이트하는 전문가입니다.
+        system_prompt = """부모 노드의 요약을 업데이트하라.
 중요한 규칙:
-1. 부모 노드의 주제와 관련된 내용만 포함하세요
-2. 자식 노드의 주제와 무관한 내용은 절대 포함하지 마세요
-3. 부모 노드의 원래 주제 맥락을 유지하세요
-4. 간결하고 핵심적인 요약만 작성하세요"""
+1. 부모 노드의 주제와 관련된 내용만 포함하라
+2. 자식 노드의 주제와 무관한 내용은 절대 포함하지 마라
+3. 부모 노드의 원래 주제 맥락을 유지하라
+4. 간결하고 핵심적인 요약만 작성하라"""
         
         # 모든 자식 노드의 주제를 수집하여 맥락 제공
         child_topics = []
@@ -901,8 +956,8 @@ AI: {ai_content}
 자식 노드들: {', '.join(child_topics)}
 업데이트된 자식 노드: {child_node.topic}
 
-부모 노드 '{parent_node.topic}'의 주제와 직접 관련된 내용만으로 요약을 업데이트하세요. 
-다른 주제의 내용은 포함하지 마세요."""
+부모 노드 '{parent_node.topic}'의 주제와 직접 관련된 내용만으로 요약을 업데이트하라. 
+다른 주제의 내용은 포함하지 마라."""
         
         updated_summary = await self._generate_enhanced_parent_summary_async(parent_node, child_node, child_topics)
         self.memory_manager.update_node(parent_node.node_id, summary=updated_summary)
@@ -953,7 +1008,7 @@ AI: {ai_content}
             """
         ]
         
-        system_prompt = "당신은 대화 내용을 정확하고 간결하게 요약하는 전문가입니다. 핵심 정보를 놓치지 않으면서도 읽기 쉬운 요약을 작성해주세요."
+        system_prompt = "대화 내용을 정확하고 간결하게 요약하라. 핵심 정보를 놓치지 않으면서도 읽기 쉬운 요약을 작성하라."
         
         try:
             # Generate multiple summaries using different perspectives
@@ -996,14 +1051,14 @@ AI: {ai_content}
             f"""
             {base_content}
             
-            부모 노드 '{parent_node.topic}'의 주제와 직접 관련된 내용만으로 요약을 업데이트하세요.
-            자식 노드의 변화를 반영하되, 부모 노드의 원래 주제 맥락을 유지하세요.
+            부모 노드 '{parent_node.topic}'의 주제와 직접 관련된 내용만으로 요약을 업데이트하라.
+            자식 노드의 변화를 반영하되, 부모 노드의 원래 주제 맥락을 유지하라.
             """,
             f"""
             {base_content}
             
             부모 노드의 전체적인 구조와 하위 주제들을 고려하여 포괄적인 요약을 만들어주세요.
-            새로 추가된 자식 노드의 내용을 자연스럽게 통합하세요.
+            새로 추가된 자식 노드의 내용을 자연스럽게 통합하라.
             """,
             f"""
             {base_content}
@@ -1013,12 +1068,12 @@ AI: {ai_content}
             """
         ]
         
-        system_prompt = """당신은 계층적 메모리 구조에서 부모 노드의 요약을 업데이트하는 전문가입니다.
-다음 원칙을 따르세요:
+        system_prompt = """계층적 메모리 구조에서 부모 노드의 요약을 업데이트하라.
+다음 원칙을 따르라:
 1. 부모 노드의 주제와 직접 관련된 내용만 포함
-2. 자식 노드의 주제와 무관한 내용은 절대 포함하지 마세요
-3. 부모 노드의 원래 주제 맥락을 유지하세요
-4. 간결하고 핵심적인 요약만 작성하세요"""
+2. 자식 노드의 주제와 무관한 내용은 절대 포함하지 마라
+3. 부모 노드의 원래 주제 맥락을 유지하라
+4. 간결하고 핵심적인 요약만 작성하라"""
         
         try:
             # Generate multiple summaries using different perspectives
@@ -1083,8 +1138,8 @@ AI: {ai_content}
     
     async def _check_category_relevance(self, user_input, category_name, category_summary):
         """특정 카테고리와 사용자 입력의 관련성을 판단합니다."""
-        system_prompt = """사용자의 입력이 주어진 카테고리와 관련이 있는지 판단하세요.
-관련이 있으면 "True", 없으면 "False"로만 답하세요."""
+        system_prompt = """사용자의 입력이 주어진 카테고리와 관련이 있는지 판단하라.
+관련이 있으면 "True", 없으면 "False"로만 답하라."""
         
         query = f"""사용자 입력: {user_input}
 카테고리 이름: {category_name}
@@ -1100,7 +1155,7 @@ AI: {ai_content}
     
     async def _generate_category_name(self, user_input):
         """사용자 입력을 기반으로 카테고리명을 생성합니다."""
-        system_prompt = """사용자 입력을 분석하여 적절한 카테고리명을 생성하세요.
+        system_prompt = """사용자 입력을 분석하여 적절한 카테고리명을 생성하라.
 - 2-8자의 간결한 한국어로 작성
 - 포괄적이면서도 구체적인 주제 표현
 - 예: "음식", "반려동물", "취미활동" 등"""
@@ -1115,7 +1170,7 @@ AI: {ai_content}
     
     async def _generate_category_summary(self, user_input):
         """사용자 입력을 기반으로 카테고리 요약을 생성합니다."""
-        system_prompt = """사용자 입력을 분석하여 해당 카테고리의 요약을 생성하세요.
+        system_prompt = """사용자 입력을 분석하여 해당 카테고리의 요약을 생성하라.
 - 1-2문장의 간결한 설명
 - 카테고리가 포함할 내용의 범위를 명확히 표현
 - 예: "음식과 요리에 관한 모든 대화", "개인 정보와 배경에 관한 내용" 등"""
@@ -1141,8 +1196,8 @@ AI: {ai_content}
             return relevant_categories[0]
         
         # AI를 통한 최적 카테고리 선택
-        system_prompt = """사용자 입력에 가장 적합한 카테고리를 선택하세요.
-카테고리명만 정확히 답하세요."""
+        system_prompt = """사용자 입력에 가장 적합한 카테고리를 선택하라.
+카테고리명만 정확히 답하라."""
         
         categories_text = "\n".join([f"- {name}" for name in relevant_categories])
         query = f"""사용자 입력: {user_input}
@@ -1262,8 +1317,8 @@ AI: {ai_content}
             return " & ".join(topics)
         
         # AI를 통한 그룹명 생성
-        system_prompt = """여러 주제를 포괄하는 짧고 명확한 그룹명을 생성하세요.
-IMPORTANT: 오직 그룹명만 답변하세요. 설명이나 다른 텍스트는 포함하지 마세요.
+        system_prompt = """여러 주제를 포괄하는 짧고 명확한 그룹명을 생성하라.
+IMPORTANT: 오직 그룹명만 답변하라. 설명이나 다른 텍스트는 포함하지 마라.
 - 한글로 2-8자 이내의 단어
 - 예: "과학", "음식", "언어", "경제", "철학"
 - 카테고리명으로 적절한 핵심 단어"""
@@ -1333,8 +1388,8 @@ IMPORTANT: 오직 그룹명만 답변하세요. 설명이나 다른 텍스트는
             return summaries[0]
         
         # AI를 통한 통합 요약 생성
-        system_prompt = """여러 요약을 하나로 통합하여 간결하고 포괄적인 요약을 생성하세요.
-중요한 정보는 유지하면서 중복은 제거하고, 1-2문장으로 작성하세요."""
+        system_prompt = """여러 요약을 하나로 통합하여 간결하고 포괄적인 요약을 생성하라.
+중요한 정보는 유지하면서 중복은 제거하고, 1-2문장으로 작성하라."""
         
         try:
             summaries_text = " | ".join(summaries)
@@ -1426,13 +1481,13 @@ IMPORTANT: 오직 그룹명만 답변하세요. 설명이나 다른 텍스트는
     
     async def _generate_conversation_topic(self, user_input):
         """사용자 입력을 기반으로 대화의 구체적인 주제를 생성합니다."""
-        system_prompt = """사용자의 발언을 분석하여 구체적이고 명확한 대화 주제를 생성하세요.
+        system_prompt = """사용자의 발언을 분석하여 구체적이고 명확한 대화 주제를 생성하라.
 주제는 간결하고 정확하게 핵심 내용을 담아야 합니다.
 예시:
 - "내 이름은 김철수이고 수학을 좋아한다" → "개인 소개"
 - "사과의 영양소에 대해 궁금하다" → "사과 영양소"
 - "양자역학의 불확정성 원리가 흥미롭다" → "양자역학 불확정성"
-한국어로 2-4단어 정도의 간결한 주제를 생성하세요."""
+한국어로 2-4단어 정도의 간결한 주제를 생성하라."""
         
         try:
             prompt = f"사용자 발언: '{user_input}'"
@@ -1447,9 +1502,9 @@ IMPORTANT: 오직 그룹명만 답변하세요. 설명이나 다른 텍스트는
     
     async def _generate_category_summary(self, user_input):
         """사용자 입력을 기반으로 카테고리의 요약을 생성합니다."""
-        system_prompt = """사용자의 발언을 분석하여 해당 카테고리의 요약 설명을 생성하세요.
-요약은 이 카테고리가 어떤 내용을 다루는지 명확하게 설명해야 합니다.
-1-2문장으로 간결하지만 포괄적으로 작성하세요.
+        system_prompt = """사용자의 발언을 분석하여 해당 카테고리의 요약 설명을 생성하라.
+요약은 이 카테고리가 어떤 내용을 다루는지 명확하게 설명해야 한다.
+1-2문장으로 간결하지만 포괄적으로 작성하라.
 예시:
 - "내 이름은 김철수이고 수학을 좋아한다" → "사용자의 기본 정보와 개인적 특성에 관한 내용"
 - "사과의 영양소에 대해 궁금하다" → "과일의 영양 성분과 건강 효과에 관한 정보"
@@ -1466,8 +1521,8 @@ IMPORTANT: 오직 그룹명만 답변하세요. 설명이나 다른 텍스트는
     
     async def _generate_conversation_summary(self, conversation):
         """대화 내용을 기반으로 요약을 생성합니다."""
-        system_prompt = """주어진 대화를 분석하여 핵심 내용을 요약하세요.
-중요한 정보는 유지하면서 1-2문장으로 간결하게 작성하세요.
+        system_prompt = """주어진 대화를 분석하여 핵심 내용을 요약하라.
+중요한 정보는 유지하면서 1-2문장으로 간결하게 작성하라.
 대화의 주요 주제와 결론을 포함해야 합니다."""
         
         try:
@@ -1491,8 +1546,8 @@ IMPORTANT: 오직 그룹명만 답변하세요. 설명이나 다른 텍스트는
             relevant_categories = []
             for category in existing_categories:
                 # AI를 사용한 관련성 판단
-                system_prompt = f"""사용자의 발언이 '{category}' 카테고리와 관련이 있는지 판단하세요.
-관련이 있으면 "True", 없으면 "False"로만 답변하세요."""
+                system_prompt = f"""사용자의 발언이 '{category}' 카테고리와 관련이 있는지 판단하라.
+관련이 있으면 "True", 없으면 "False"로만 답변하라."""
                 
                 prompt = f"사용자 발언: '{user_input}'"
                 result = await self.ai_manager.call_ai_async_single(prompt, system_prompt)
@@ -1552,3 +1607,210 @@ IMPORTANT: 오직 그룹명만 답변하세요. 설명이나 다른 텍스트는
                 return True
         
         return False
+    
+    def _find_category_node_by_name(self, category_name):
+        """카테고리 이름으로 노드를 찾습니다."""
+        root_node = self.memory_manager.get_root_node()
+        if not root_node:
+            return None
+        
+        for child_id in root_node.children_ids:
+            child_node = self.memory_manager.get_node(child_id)
+            if child_node and child_node.topic == category_name:
+                return child_node
+        return None
+    
+    async def _check_category_similarity(self, category_a_node, category_b_node):
+        """두 카테고리의 유사도를 AI로 판단합니다."""
+        system_prompt = """두 카테고리가 하나의 그룹으로 묶일 만큼 유사한지 판단하라.
+유사도 기준:
+- 같은 상위 개념의 하위 분야들인가?
+- 함께 다루어도 자연스러운 주제들인가?
+- 사용자가 관련지어 생각할 만한 카테고리들인가?
+
+반드시 "True" (그룹화 적합) 또는 "False" (그룹화 부적합)로만 답하라."""
+        
+        prompt = f"""카테고리 A: {category_a_node.topic}
+카테고리 A 설명: {category_a_node.summary}
+
+카테고리 B: {category_b_node.topic}  
+카테고리 B 설명: {category_b_node.summary}
+
+위 두 카테고리가 하나의 그룹으로 묶일 만큼 유사합니까?"""
+        
+        try:
+            result = await self.ai_manager.call_ai_async_single(
+                prompt, system_prompt, fine=GROUP_SIMILARITY_FINE
+            )
+            is_similar = result.strip().lower() == 'true'
+            
+            if self.debug:
+                print(f">>>> [SIMILARITY] '{category_a_node.topic}' vs '{category_b_node.topic}': {is_similar}")
+            
+            return is_similar
+        except Exception as e:
+            if self.debug:
+                print(f">>>> [ERROR] 유사도 판단 오류: {e}")
+            return False
+    
+    async def _generate_group_name_for_categories(self, category_a, category_b):
+        """두 카테고리를 위한 그룹명을 생성합니다."""
+        system_prompt = """두 카테고리를 포괄하는 적절한 그룹명을 생성하라.
+요구사항:
+- 2-8자의 간결한 한국어
+- 두 카테고리의 공통점을 반영
+- 상위 개념으로 추상화
+- 예: "학업", "취미", "예술", "운동" 등
+
+오직 그룹명만 답변하라."""
+        
+        prompt = f"카테고리 1: {category_a}\n카테고리 2: {category_b}"
+        
+        try:
+            result = await self.ai_manager.call_ai_async_single(prompt, system_prompt)
+            group_name = result.strip()
+            
+            # 길이 제한 검증
+            if len(group_name) > 8:
+                group_name = group_name[:8]
+            
+            if self.debug:
+                print(f">>>> [GROUP-NAME] 생성된 그룹명: '{group_name}'")
+            
+            return group_name
+        except Exception as e:
+            if self.debug:
+                print(f">>>> [ERROR] 그룹명 생성 오류: {e}")
+            return f"{category_a[:2]}{category_b[:2]}"  # 폴백
+    
+    async def _generate_group_summary_for_categories(self, category_a_node, category_b_node):
+        """두 카테고리를 위한 그룹 요약을 생성합니다."""
+        system_prompt = """두 카테고리를 포괄하는 그룹 요약을 작성하라.
+요구사항:
+- 두 카테고리의 공통점과 특징을 설명
+- 50자 내외의 간결한 설명
+- "에 관한 카테고리 그룹입니다" 형태로 마무리"""
+        
+        prompt = f"""카테고리 A: {category_a_node.topic}
+설명: {category_a_node.summary}
+
+카테고리 B: {category_b_node.topic}
+설명: {category_b_node.summary}"""
+        
+        try:
+            result = await self.ai_manager.call_ai_async_single(prompt, system_prompt)
+            return result.strip()
+        except Exception as e:
+            if self.debug:
+                print(f">>>> [ERROR] 그룹 요약 생성 오류: {e}")
+            return f"{category_a_node.topic}과 {category_b_node.topic}에 관한 카테고리 그룹입니다."
+    
+    def _can_create_group_above(self, node_id):
+        """노드 위에 그룹을 생성할 수 있는지 깊이를 검증합니다."""
+        node_depth = self.memory_manager.get_node_depth(node_id)
+        # 그룹 삽입 시 전체 서브트리가 +1 깊이 증가
+        max_subtree_depth = self.memory_manager.get_subtree_max_depth(node_id)
+        return max_subtree_depth + 1 <= self.max_depth
+    
+    async def _select_target_category_in_group(self, user_input, categories):
+        """그룹 내에서 대화를 추가할 적절한 카테고리를 선택합니다."""
+        system_prompt = """사용자 입력이 주어진 카테고리들 중 어느 것에 더 적합한지 판단하라.
+첫 번째 카테고리명만 답변하라."""
+        
+        prompt = f"""사용자 입력: {user_input}
+
+카테고리 옵션:
+1. {categories[0]}
+2. {categories[1]}
+
+더 적합한 카테고리는?"""
+        
+        try:
+            result = await self.ai_manager.call_ai_async_single(prompt, system_prompt)
+            selected = result.strip()
+            
+            # 결과가 카테고리 중 하나와 일치하는지 확인
+            for category in categories:
+                if category in selected:
+                    return category
+            
+            # 일치하지 않으면 첫 번째 반환
+            return categories[0]
+        except Exception as e:
+            if self.debug:
+                print(f">>>> [ERROR] 카테고리 선택 오류: {e}")
+            return categories[0]
+    
+    async def _handle_depth_limit_with_merge(self, conversation, conversation_index, relevant_categories, user_input):
+        """깊이 제한으로 그룹 생성이 불가능할 때 리프 병합을 시도합니다."""
+        if self.debug:
+            print(f">>>> [MERGE] 깊이 제한으로 리프 병합 시도")
+        
+        # 첫 번째 카테고리의 가장 유사한 리프 노드 찾기
+        category_name = relevant_categories[0]
+        category_node = self._find_category_node_by_name(category_name)
+        
+        if category_node:
+            # 가장 유사한 기존 리프 찾기
+            most_similar_leaf = await self._find_most_similar_leaf(category_node, user_input)
+            
+            if most_similar_leaf:
+                # 기존 리프에 대화 인덱스 추가 (병합)
+                if not hasattr(most_similar_leaf, 'conversation_indices'):
+                    most_similar_leaf.conversation_indices = []
+                most_similar_leaf.conversation_indices.append(conversation_index)
+                
+                # 요약 업데이트
+                most_similar_leaf.summary = await self._update_summary_with_merge(
+                    most_similar_leaf.summary, conversation[0]['content'], conversation[1]['content']
+                )
+                
+                if self.debug:
+                    print(f">>>> [MERGE] 리프 '{most_similar_leaf.topic}'에 대화 병합 완료")
+            else:
+                # 유사한 리프가 없으면 새 리프 생성 (깊이 허용 시)
+                if self.memory_manager.can_insert_child(category_node.node_id, self.max_depth):
+                    await self._add_to_existing_category(conversation, conversation_index, category_name, user_input)
+    
+    async def _find_most_similar_leaf(self, category_node, user_input):
+        """카테고리 내에서 가장 유사한 리프 노드를 찾습니다."""
+        best_leaf = None
+        best_score = 0
+        
+        for child_id in category_node.children_ids:
+            child_node = self.memory_manager.get_node(child_id)
+            if child_node and child_node.coordinates.get("start", -1) >= 0:  # 리프 노드
+                # 유사도 점수 계산 (간단한 키워드 매칭)
+                score = self._calculate_similarity_score(user_input, child_node.summary)
+                if score > best_score:
+                    best_score = score
+                    best_leaf = child_node
+        
+        return best_leaf
+    
+    def _calculate_similarity_score(self, text1, text2):
+        """두 텍스트의 간단한 유사도 점수를 계산합니다."""
+        words1 = set(text1.split())
+        words2 = set(text2.split())
+        intersection = words1.intersection(words2)
+        union = words1.union(words2)
+        return len(intersection) / len(union) if union else 0
+    
+    async def _update_summary_with_merge(self, current_summary, new_user_content, new_ai_content):
+        """병합 시 요약을 업데이트합니다."""
+        system_prompt = """기존 요약에 새로운 대화를 통합하여 업데이트된 요약을 작성해주세요.
+"여러 대화가 포함됨"이라는 표현을 자연스럽게 포함해주세요."""
+        
+        prompt = f"""기존 요약: {current_summary}
+
+새로운 대화:
+사용자: {new_user_content}
+AI: {new_ai_content}"""
+        
+        try:
+            result = await self.ai_manager.call_ai_async_single(prompt, system_prompt)
+            return result.strip()
+        except Exception as e:
+            if self.debug:
+                print(f">>>> [ERROR] 병합 요약 업데이트 오류: {e}")
+            return f"{current_summary} (추가 대화 포함)"
