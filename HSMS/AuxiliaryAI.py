@@ -56,8 +56,10 @@ class AuxiliaryAI:
             else:
                 print(f">>>> [AUX] 기존 카테고리 없음")
         
-        # 2. 카테고리별 관련성 평가
-        relevant_categories = await self._evaluate_category_relevance(user_input, existing_categories)
+        # 2. 카테고리별 관련성 평가 (병렬 처리)
+        category_summaries = {name: info['summary'] for name, info in existing_categories.items()}
+        category_relevance = await self._check_category_relevance_async(user_input, category_summaries)
+        relevant_categories = [name for name, is_relevant in category_relevance.items() if is_relevant]
         
         if self.debug:
             print(f">>>> [AUX] 관련 카테고리: {relevant_categories}")
@@ -88,9 +90,10 @@ class AuxiliaryAI:
             await self._fallback_merge_to_similar_category(conversation, conversation_index, user_input)
             return
         
-        # AI를 통한 카테고리명 생성
-        category_name = await self._generate_category_name(user_input)
-        category_summary = await self._generate_category_summary(user_input)
+        # AI를 통한 카테고리명과 요약을 병렬 생성
+        category_name_task = self._generate_category_name(user_input)
+        category_summary_task = self._generate_category_summary(user_input)
+        category_name, category_summary = await asyncio.gather(category_name_task, category_summary_task)
         
         if self.debug:
             print(f">>>> [AUX] 생성할 카테고리: '{category_name}'")
@@ -315,6 +318,11 @@ class AuxiliaryAI:
         
         try:
             # 여러 API 키를 사용한 병렬 처리
+            if self.debug:
+                print(f">> [DEBUG] call_ai_async_multiple 호출 준비")
+                print(f">> [DEBUG] queries 개수: {len(queries)}")
+                print(f">> [DEBUG] LOAD_API_KEYS 개수: {len(LOAD_API_KEYS) if LOAD_API_KEYS else 0}")
+            
             results = await self.ai_manager.call_ai_async_multiple(
                 queries, system_prompt, fine=CATEGORY_RELEVANCE_FINE
             )
@@ -1050,11 +1058,26 @@ AI: {ai_content}
         
         relevant_categories = {}
         
-        # 각 카테고리별 관련성 AI 판단
-        for category_name, category_info in existing_categories.items():
-            is_relevant = await self._check_category_relevance(user_input, category_name, category_info['summary'])
-            if is_relevant:
-                relevant_categories[category_name] = category_info
+        # 병렬로 각 카테고리별 관련성 AI 판단
+        tasks = []
+        category_items = list(existing_categories.items())
+        
+        for category_name, category_info in category_items:
+            task = self._check_category_relevance(user_input, category_name, category_info['summary'])
+            tasks.append((category_name, category_info, task))
+        
+        # 병렬 실행
+        results = await asyncio.gather(*[task for _, _, task in tasks], return_exceptions=True)
+        
+        # 결과 처리
+        for i, (category_name, category_info, _) in enumerate(tasks):
+            try:
+                is_relevant = results[i]
+                if not isinstance(is_relevant, Exception) and is_relevant:
+                    relevant_categories[category_name] = category_info
+            except Exception as e:
+                if self.debug:
+                    print(f">>>> [ERROR] 카테고리 {category_name} 관련성 판단 오류: {e}")
         
         return relevant_categories
     

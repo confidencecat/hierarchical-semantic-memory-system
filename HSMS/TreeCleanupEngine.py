@@ -215,10 +215,11 @@ class TreeCleanupEngine:
     
     async def _create_cluster_group(self, parent_id, cluster_nodes, group_name):
         """클러스터를 위한 그룹 노드를 생성하고 자식들을 재배치합니다."""
-        # 그룹명 AI 생성
+        # 그룹명과 요약을 병렬로 AI 생성
         topics = [node.topic for node in cluster_nodes]
-        group_topic = await self._generate_group_name(topics)
-        group_summary = await self._generate_group_summary(cluster_nodes)
+        topic_task = self._generate_group_name(topics)
+        summary_task = self._generate_group_summary(cluster_nodes)
+        group_topic, group_summary = await asyncio.gather(topic_task, summary_task)
         
         # 그룹 노드 생성
         group_node = MemoryNode(
