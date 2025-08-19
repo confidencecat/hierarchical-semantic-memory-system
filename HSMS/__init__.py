@@ -10,6 +10,7 @@ Classes:
     - AIManager: AI 호출 및 비동기 처리 관리
     - AuxiliaryAI: 보조 AI (핵심 분류 및 기억 처리)
     - MainAI: 메인 AI (사용자 대화 처리)
+    - TreeCleanupEngine: 트리 정리 및 최적화 엔진
 """
 
 from .DataManager import DataManager
@@ -18,6 +19,7 @@ from .MemoryManager import MemoryManager
 from .AIManager import AIManager
 from .AuxiliaryAI import AuxiliaryAI
 from .MainAI import MainAI
+from .TreeCleanupEngine import TreeCleanupEngine
 
 __all__ = [
     'DataManager',
@@ -25,7 +27,8 @@ __all__ = [
     'MemoryManager',
     'AIManager',
     'AuxiliaryAI',
-    'MainAI'
+    'MainAI',
+    'TreeCleanupEngine'
 ]
 
 # 패키지 정보

@@ -2,7 +2,7 @@ import asyncio
 import argparse
 import time
 # 새로운 모듈 구조에서 클래스 임포트
-from HSMS import MainAI, MemoryManager
+from HSMS import MainAI, MemoryManager, TreeCleanupEngine
 from config import API_KEY, LOAD_API_KEYS, TEST_QUESTIONS, RECORD_TEST_QUESTIONS
 
 
@@ -40,8 +40,42 @@ def parse_arguments():
         action='store_true',
         help='디버그 모드 활성화 (AI 분류 과정, 메모리 상태 등 상세 정보 출력)'
     )
-    return parser.parse_args()
-    return parser.parse_args()
+    # 동적 트리 및 트리 정리 기능 관련 인수
+    parser.add_argument(
+        '--max-depth',
+        type=int,
+        default=4,
+        help='트리의 최대 깊이를 설정합니다 (최소 3).'
+    )
+    parser.add_argument(
+        '--clean-tree',
+        action='store_true',
+        help='트리 구조를 정리하고 최적화합니다.'
+    )
+    parser.add_argument(
+        '--fanout-limit',
+        type=int,
+        default=12,
+        help='한 노드가 가질 수 있는 최대 자식 수 (트리 정리 시 사용).'
+    )
+    parser.add_argument(
+        '--rename',
+        action='store_true',
+        help='트리 정리 시 노드 이름을 자동으로 재명명합니다.'
+    )
+    parser.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='트리 정리 시 실제 변경 없이 계획만 출력합니다.'
+    )
+    
+    args = parser.parse_args()
+    
+    # max-depth 유효성 검사
+    if args.max_depth < 3:
+        parser.error("--max-depth는 3 이상이어야 합니다.")
+        
+    return args
 
 
 def show_api_info():
@@ -156,7 +190,7 @@ def show_tree_structure():
     print("=" * 50)
 
 
-async def run_test_mode(force_search=False, force_record=False, debug=False):
+async def run_test_mode(force_search=False, force_record=False, debug=False, max_depth=4):
     """테스트 모드로 실행합니다."""
     print("=== 계층적 의미 기억 시스템 시작 (테스트 모드) ===")
     if force_search:
@@ -168,10 +202,10 @@ async def run_test_mode(force_search=False, force_record=False, debug=False):
     if debug:
         print(">> 디버그 모드: 상세 정보를 출력합니다.")
     
-    main_ai_instance = MainAI(force_search=force_search, force_record=force_record, debug=debug)
+    main_ai_instance = MainAI(force_search=force_search, force_record=force_record, debug=debug, max_depth=max_depth)
     
     # 테스트 질문들 - 더 다양한 시나리오 추가
-    test_questions = RECORD_TEST_QUESTIONS
+    test_questions = TEST_QUESTIONS
 
     for i, question in enumerate(test_questions):
         print(f"\n--- 질문 {i+1} ---")
@@ -204,7 +238,7 @@ async def run_test_mode(force_search=False, force_record=False, debug=False):
     print(f"트리 구조:\n{final_status['tree_summary']}")
 
 
-async def run_chat_mode(force_search=False, force_record=False, debug=False):
+async def run_chat_mode(force_search=False, force_record=False, debug=False, max_depth=4):
     """대화형 모드로 실행합니다."""
     print("=== 계층적 의미 기억 시스템 시작 (대화형 모드) ===")
     if force_search:
@@ -216,7 +250,7 @@ async def run_chat_mode(force_search=False, force_record=False, debug=False):
     if debug:
         print(">> 디버그 모드: 상세 정보를 출력합니다.")
     
-    main_ai_instance = MainAI(force_search=force_search, force_record=force_record, debug=debug)
+    main_ai_instance = MainAI(force_search=force_search, force_record=force_record, debug=debug, max_depth=max_depth)
     
     print("\n=== 대화형 모드 (종료하려면 'exit' 입력) ===")
     while True:
@@ -250,14 +284,14 @@ def run_discord_mode(debug=False):
         print(f"|| 오류: Discord 봇 실행 중 오류 발생: {e}")
 
 
-async def run_search_mode(debug=False):
+async def run_search_mode(debug=False, max_depth=4):
     """검색 전용 모드로 실행합니다 (모든 대화에서 기억 검색)."""
     print("=== 계층적 의미 기억 시스템 시작 (검색 전용 모드) ===")
     print("|| 검색 모드: 모든 대화에서 기억 탐색을 수행합니다.")
     if debug:
         print(">> 디버그 모드: 상세 정보를 출력합니다.")
     
-    main_ai_instance = MainAI(force_search=True, debug=debug)
+    main_ai_instance = MainAI(force_search=True, debug=debug, max_depth=max_depth)
     
     print("\n=== 검색 모드 (종료하려면 'exit' 입력) ===")
     
@@ -288,9 +322,9 @@ async def run_search_mode(debug=False):
             print(f"|| 오류: 검색 중 오류 발생: {e}")
 
 
-def main_ai(prompt='False'):
+def main_ai(prompt='False', max_depth=4):
     """메인 AI 인스턴스를 생성하고 대화를 처리합니다."""
-    main_ai_instance = MainAI()
+    main_ai_instance = MainAI(max_depth=max_depth)
     return main_ai_instance.chat(prompt)
 
 
@@ -308,6 +342,26 @@ if __name__ == '__main__':
     if args.tree:
         show_tree_structure()
     
+    # clean-tree 기능 처리
+    if args.clean_tree:
+        print(f">> [CLEAN] 트리 정리 시작 (max-depth: {args.max_depth}, fanout-limit: {args.fanout_limit})")
+        if args.dry_run:
+            print(">> [CLEAN] 드라이런 모드: 실제 변경 없이 계획만 출력")
+        if args.rename:
+            print(">> [CLEAN] 노드 재명명 활성화")
+        
+        # 트리 정리 엔진 실행
+        memory_manager = MemoryManager()
+        cleanup_engine = TreeCleanupEngine(
+            memory_manager=memory_manager,
+            max_depth=args.max_depth,
+            fanout_limit=args.fanout_limit,
+            debug=True  # 정리 과정에서는 항상 디버그 출력
+        )
+        
+        asyncio.run(cleanup_engine.run_cleanup(rename_nodes=args.rename, dry_run=args.dry_run))
+        exit(0)
+    
     # tree나 api_info만 요청한 경우 종료
     if args.tree or args.api_info:
         if not (args.mode in ['test', 'chat', 'discord', 'search']):
@@ -317,10 +371,10 @@ if __name__ == '__main__':
     force_record = getattr(args, 'force_record', False)
     
     if args.mode == 'test':
-        asyncio.run(run_test_mode(force_search=force_search, force_record=force_record, debug=args.debug))
+        asyncio.run(run_test_mode(force_search=force_search, force_record=force_record, debug=args.debug, max_depth=args.max_depth))
     elif args.mode == 'chat':
-        asyncio.run(run_chat_mode(force_search=force_search, force_record=force_record, debug=args.debug))
+        asyncio.run(run_chat_mode(force_search=force_search, force_record=force_record, debug=args.debug, max_depth=args.max_depth))
     elif args.mode == 'discord':
         run_discord_mode(debug=args.debug)
     elif args.mode == 'search':
-        asyncio.run(run_search_mode(debug=args.debug))
+        asyncio.run(run_search_mode(debug=args.debug, max_depth=args.max_depth))

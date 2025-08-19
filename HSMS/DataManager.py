@@ -8,8 +8,29 @@ class DataManager:
     @staticmethod
     def load_json(file):
         if os.path.exists(file):
-            with open(file, 'r', encoding='utf-8') as f:
-                return json.load(f)
+            try:
+                with open(file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    if not content.strip():
+                        return []
+                    return json.loads(content)
+            except json.JSONDecodeError as e:
+                print(f"JSON 파일 파싱 오류 ({file}): {e}")
+                print("손상된 JSON 파일을 백업하고 새로 시작합니다.")
+                
+                # 백업 파일 생성
+                backup_file = f"{file}.backup"
+                if os.path.exists(file):
+                    with open(file, 'r', encoding='utf-8') as f:
+                        backup_content = f.read()
+                    with open(backup_file, 'w', encoding='utf-8') as f:
+                        f.write(backup_content)
+                    print(f"백업 파일 생성: {backup_file}")
+                
+                return []
+            except Exception as e:
+                print(f"파일 읽기 오류 ({file}): {e}")
+                return []
         return []
 
     @staticmethod

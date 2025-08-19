@@ -19,12 +19,18 @@ class MemoryNode:
     
     def add_conversation(self, conversation_index):
         """대화 인덱스를 노드에 추가 (중복 방지)"""
+        if not isinstance(conversation_index, int) or conversation_index < 0:
+            raise ValueError(f"Invalid conversation_index: {conversation_index}")
+        
         if conversation_index not in self.conversation_indices:
             self.conversation_indices.append(conversation_index)
             self.conversation_indices.sort()  # 정렬 유지
     
     def remove_conversation(self, conversation_index):
         """대화 인덱스를 노드에서 제거"""
+        if not isinstance(conversation_index, int):
+            raise ValueError(f"Invalid conversation_index: {conversation_index}")
+            
         if conversation_index in self.conversation_indices:
             self.conversation_indices.remove(conversation_index)
     
