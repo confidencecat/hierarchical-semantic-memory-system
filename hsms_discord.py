@@ -15,10 +15,10 @@ bot = commands.Bot(command_prefix='!', intents=intents, help_command=None)
 ai_instances = {}
 debug_mode = False  # 전역 디버그 모드 설정
 
-def get_ai_instance(guild_id, force_search=False):
+def get_ai_instance(guild_id, force_search=False, top_search_n=0):
     """서버별 AI 인스턴스를 가져오거나 생성합니다."""
     if guild_id not in ai_instances:
-        ai_instances[guild_id] = MainAI(force_search=force_search, debug=debug_mode)
+        ai_instances[guild_id] = MainAI(force_search=force_search, debug=debug_mode, top_search_n=top_search_n)
     return ai_instances[guild_id]
 
 def set_debug_mode(debug):

@@ -8,14 +8,15 @@ from .AIManager import AIManager
 class MainAI:
     """메인 인공지능 - 사용자와 직접 대화하는 주체"""
     
-    def __init__(self, force_search=False, force_record=False, debug=False, max_depth=4):
+    def __init__(self, force_search=False, force_record=False, debug=False, max_depth=4, top_search_n=0):
         self.memory_manager = MemoryManager(debug=debug)
-        self.auxiliary_ai = AuxiliaryAI(self.memory_manager, debug=debug, max_depth=max_depth)
+        self.auxiliary_ai = AuxiliaryAI(self.memory_manager, debug=debug, max_depth=max_depth, top_search_n=top_search_n)
         self.ai_manager = AIManager(debug=debug)
         self.force_search = force_search  # 모든 대화에서 기억 호출 강제 여부
         self.force_record = force_record  # AI 응답 없이 기록만 수행 여부
         self.debug = debug  # 디버그 모드 활성화 여부
         self.max_depth = max_depth  # 트리 최대 깊이
+        self.top_search_n = top_search_n  # 반환할 최대 대화 수
         
         # force_search와 force_record는 동시에 사용할 수 없음
         if self.force_search and self.force_record:
@@ -68,17 +69,7 @@ class MainAI:
         # 2. 기억 검색 (필요한 경우만)
         relevant_data = ""
         if need_memory:
-            if self.debug:
-                print(f"│  검색 실행중...")
-            
             relevant_data = await self.auxiliary_ai.search_relevant_memories(user_input)
-            
-            if self.debug:
-                if relevant_data.strip():
-                    preview = relevant_data[:100].replace('\n', ' ')
-                    print(f"│  검색 결과: {len(relevant_data)}자 (미리보기: {preview}...)")
-                else:
-                    print(f"│  검색 결과: 관련 기억 없음")
         
         if self.debug:
             print(f"└─ [MEMORY-SEARCH] 기억 검색 완료")
@@ -92,11 +83,9 @@ class MainAI:
 답변은 간결하고 친근하게 1-2문장으로 작성하라.
 절대로 이모티콘을 사용하지 마라."""
             
-            prompt = f"""과거 기억: {relevant_data}
+            prompt = f"""{relevant_data}
 
-사용자 질문: {user_input}
-
-과거 기억을 참고하여 답변해주세요."""
+사용자 질문: {user_input}"""
             
             if self.debug:
                 print(f"│  유형: 기억 기반 응답")

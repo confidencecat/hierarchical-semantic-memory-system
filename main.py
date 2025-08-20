@@ -68,6 +68,12 @@ def parse_arguments():
         action='store_true',
         help='트리 정리 시 실제 변경 없이 계획만 출력합니다.'
     )
+    parser.add_argument(
+        '--top-search-n',
+        type=int,
+        default=0,
+        help='검색 결과에서 반환할 최대 대화 수 (0이면 모든 관련 대화 반환, 기본값: 0)'
+    )
     
     args = parser.parse_args()
     
@@ -190,7 +196,7 @@ def show_tree_structure():
     print("=" * 50)
 
 
-async def run_test_mode(force_search=False, force_record=False, debug=False, max_depth=4):
+async def run_test_mode(force_search=False, force_record=False, debug=False, max_depth=4, top_search_n=0):
     """테스트 모드로 실행합니다."""
     print("=== 계층적 의미 기억 시스템 시작 (테스트 모드) ===")
     if force_search:
@@ -202,7 +208,7 @@ async def run_test_mode(force_search=False, force_record=False, debug=False, max
     if debug:
         print(">> 디버그 모드: 상세 정보를 출력합니다.")
     
-    main_ai_instance = MainAI(force_search=force_search, force_record=force_record, debug=debug, max_depth=max_depth)
+    main_ai_instance = MainAI(force_search=force_search, force_record=force_record, debug=debug, max_depth=max_depth, top_search_n=top_search_n)
     
     # 테스트 질문들 - 더 다양한 시나리오 추가
     test_questions = TEST_QUESTIONS
@@ -238,7 +244,7 @@ async def run_test_mode(force_search=False, force_record=False, debug=False, max
     print(f"트리 구조:\n{final_status['tree_summary']}")
 
 
-async def run_chat_mode(force_search=False, force_record=False, debug=False, max_depth=4):
+async def run_chat_mode(force_search=False, force_record=False, debug=False, max_depth=4, top_search_n=0):
     """대화형 모드로 실행합니다."""
     print("=== 계층적 의미 기억 시스템 시작 (대화형 모드) ===")
     if force_search:
@@ -250,7 +256,7 @@ async def run_chat_mode(force_search=False, force_record=False, debug=False, max
     if debug:
         print(">> 디버그 모드: 상세 정보를 출력합니다.")
     
-    main_ai_instance = MainAI(force_search=force_search, force_record=force_record, debug=debug, max_depth=max_depth)
+    main_ai_instance = MainAI(force_search=force_search, force_record=force_record, debug=debug, max_depth=max_depth, top_search_n=top_search_n)
     
     print("\n=== 대화형 모드 (종료하려면 'exit' 입력) ===")
     while True:
@@ -284,14 +290,14 @@ def run_discord_mode(debug=False):
         print(f"|| 오류: Discord 봇 실행 중 오류 발생: {e}")
 
 
-async def run_search_mode(debug=False, max_depth=4):
+async def run_search_mode(debug=False, max_depth=4, top_search_n=0):
     """검색 전용 모드로 실행합니다 (모든 대화에서 기억 검색)."""
     print("=== 계층적 의미 기억 시스템 시작 (검색 전용 모드) ===")
     print("|| 검색 모드: 모든 대화에서 기억 탐색을 수행합니다.")
     if debug:
         print(">> 디버그 모드: 상세 정보를 출력합니다.")
     
-    main_ai_instance = MainAI(force_search=True, debug=debug, max_depth=max_depth)
+    main_ai_instance = MainAI(force_search=True, debug=debug, max_depth=max_depth, top_search_n=top_search_n)
     
     print("\n=== 검색 모드 (종료하려면 'exit' 입력) ===")
     
@@ -322,9 +328,9 @@ async def run_search_mode(debug=False, max_depth=4):
             print(f"|| 오류: 검색 중 오류 발생: {e}")
 
 
-def main_ai(prompt='False', max_depth=4):
+def main_ai(prompt='False', max_depth=4, top_search_n=0):
     """메인 AI 인스턴스를 생성하고 대화를 처리합니다."""
-    main_ai_instance = MainAI(max_depth=max_depth)
+    main_ai_instance = MainAI(max_depth=max_depth, top_search_n=top_search_n)
     return main_ai_instance.chat(prompt)
 
 
@@ -371,10 +377,10 @@ if __name__ == '__main__':
     force_record = getattr(args, 'force_record', False)
     
     if args.mode == 'test':
-        asyncio.run(run_test_mode(force_search=force_search, force_record=force_record, debug=args.debug, max_depth=args.max_depth))
+        asyncio.run(run_test_mode(force_search=force_search, force_record=force_record, debug=args.debug, max_depth=args.max_depth, top_search_n=args.top_search_n))
     elif args.mode == 'chat':
-        asyncio.run(run_chat_mode(force_search=force_search, force_record=force_record, debug=args.debug, max_depth=args.max_depth))
+        asyncio.run(run_chat_mode(force_search=force_search, force_record=force_record, debug=args.debug, max_depth=args.max_depth, top_search_n=args.top_search_n))
     elif args.mode == 'discord':
         run_discord_mode(debug=args.debug)
     elif args.mode == 'search':
-        asyncio.run(run_search_mode(debug=args.debug, max_depth=args.max_depth))
+        asyncio.run(run_search_mode(debug=args.debug, max_depth=args.max_depth, top_search_n=args.top_search_n))

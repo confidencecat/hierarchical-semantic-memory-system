@@ -19,17 +19,12 @@ class AIManager:
         }
     
     @staticmethod
-    def call_ai(prompt='테스트', system='지침', history=None, fine=None, api_key=None, retries=3, debug=False):
+    def call_ai(prompt='테스트', system='지침', history=None, fine=None, api_key=None, retries=3, debug=False, call_info=None):
         if api_key is None:
             api_key = API_KEY['API_1']
 
-        if debug:
-            call_start = time.time()
-            print(f"      ┌─ [AI-CALL] 호출 시작")
-            print(f"      │  프롬프트: '{prompt[:50]}{'...' if len(prompt) > 50 else ''}'")
-            print(f"      │  API키: {'LOAD' if api_key in LOAD_API_KEYS else 'MAIN'}")
-            print(f"      └─ 처리 중...")
-
+        call_start = time.time()
+        
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel(GEMINI_MODEL, system_instruction=system)
 
@@ -47,8 +42,51 @@ class AIManager:
                 txt = resp._result.candidates[0].content.parts[0].text.strip()
                 result = txt[9:].strip() if txt.lower().startswith('assistant:') else txt
                 
-                if debug:
-                    call_end = time.time()
+                call_end = time.time()
+                
+                # 호출 정보 저장 (병렬 처리용)
+                if call_info is not None:
+                    call_info.update({
+                        'api_key_type': 'LOAD' if api_key in LOAD_API_KEYS else 'MAIN',
+                        'start_time': call_start,
+                        'end_time': call_end,
+                        'duration': call_end - call_start,
+                        'result_length': len(result),
+                        'success': True
+                    })
+                
+                # call_info 업데이트 (병렬 호출용)
+                if call_info is not None:
+                    call_info.update({
+                        'api_key_type': 'LOAD' if api_key in LOAD_API_KEYS else 'MAIN',
+                        'start_time': call_start,
+                        'end_time': call_end,
+                        'duration': call_end - call_start,
+                        'result_length': len(result),
+                        'success': True
+                    })
+                
+                # 단일 호출 시에만 즉시 디버그 출력
+                if debug and call_info is None:
+                    print(f"      ┌─ [AI-CALL] 호출 시작")
+                    print(f"      │  API키: {'LOAD' if api_key in LOAD_API_KEYS else 'MAIN'}")
+                    print(f"      └─ 처리 중...")
+                    
+                    print(f"\n===========> AI 호출 상세 정보 ===========>")
+                    print(f"시스템 프롬프트:")
+                    print(f"{system}")
+                    print(f"\n사용자 프롬프트:")
+                    print(f"{prompt}")
+                    if fine:
+                        print(f"\nFine-tuning 데이터: {len(fine)}개 예시")
+                    print(f"==========================================>")
+                    
+                    print(f"\n===========> AI 응답 결과 ===========>")
+                    print(f"소요시간: {call_end - call_start:.2f}초")
+                    print(f"응답:")
+                    print(f"{result}")
+                    print(f"====================================>")
+                    
                     response_info = ""
                     if result.lower() == 'true':
                         response_info = "True"
@@ -65,17 +103,20 @@ class AIManager:
             except ResourceExhausted:
                 attempt += 1
                 if attempt > retries:
-                    if debug:
-                        print(f"      └─ [AI-ERROR] 재시도 한계 도달: {retries}번")
+                    if call_info is not None:
+                        call_info.update({
+                            'success': False,
+                            'error': f'재시도 한계 도달: {retries}번'
+                        })
                     return ''
                 wait = 2 ** attempt
-                if debug:
-                    print(f"      │  [AI-RETRY] 할당량 초과, {wait}초 대기 (시도 {attempt}/{retries})")
                 time.sleep(wait)
             except Exception as e:
-                if debug:
-                    print(f"      └─ [AI-ERROR] 오류 발생: {e}")
-                print(f"AI 호출 중 오류 발생: {e}")
+                if call_info is not None:
+                    call_info.update({
+                        'success': False,
+                        'error': str(e)
+                    })
                 return ''
     
     async def call_ai_async_single(self, prompt, system, history=None, fine=None, api_key=None, retries=3):
@@ -88,7 +129,7 @@ class AIManager:
             result = await loop.run_in_executor(
                 None, 
                 self.call_ai, 
-                prompt, system, history, fine, api_key, retries, self.debug
+                prompt, system, history, fine, api_key, retries, self.debug, None
             )
             
             end_time = time.time()
@@ -117,39 +158,85 @@ class AIManager:
         self.call_stats['parallel_calls'] += 1
         start_time = time.time()
         
-        if self.debug:
-            print(f"    ┌─ [PARALLEL] 병렬 호출 시작")
-            print(f"    │  쿼리 수: {len(queries)}개")
-            print(f"    │  API 키: {len(LOAD_API_KEYS)}개")
-            print(f"    └─ 처리 중...")
+        # 각 호출의 정보를 저장할 딕셔너리들
+        call_infos = [{'query_index': i, 'query_preview': query[:50] + '...' if len(query) > 50 else query} 
+                     for i, query in enumerate(queries)]
         
         tasks = []
         for i, query in enumerate(queries):
             api_key = LOAD_API_KEYS[i % len(LOAD_API_KEYS)]  # 라운드 로빈 방식
-            task = self.call_ai_async_single(
-                query, system_prompt, history, fine, api_key
+            call_info = call_infos[i]  # 각 호출의 정보를 전달
+            
+            loop = asyncio.get_event_loop()
+            task = loop.run_in_executor(
+                None, 
+                self.call_ai, 
+                query, system_prompt, history, fine, api_key, 3, False, call_info
             )
             tasks.append(task)
         
+        # 병렬 시작 메시지 (디버그 모드일 때만)
+        if self.debug:
+            print(f"===========> AI 병렬 호출 시작 ===========>")
+            print(f"호출 수량: {len(queries)}개")
+            print(f"사용 API 키: {len(LOAD_API_KEYS)}개")
+            for i, call_info in enumerate(call_infos):
+                api_key_type = 'LOAD' if LOAD_API_KEYS[i % len(LOAD_API_KEYS)] in LOAD_API_KEYS else 'MAIN'
+                print(f"  {i+1}. API키: {api_key_type}, 쿼리: {call_info['query_preview']}")
+            print(f"=========================================>")
+        
         results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # 결과 처리 및 통계
+        successful_results = []
+        success_count = 0
+        error_count = 0
+        
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                call_infos[i]['success'] = False
+                call_infos[i]['error'] = str(result)
+                successful_results.append('')  # Empty result for failed queries
+                error_count += 1
+            else:
+                successful_results.append(result)
+                success_count += 1
+        
+        # 병렬 완료 메시지 (디버그 모드일 때만)
+        if self.debug:
+            end_time = time.time()
+            print(f"===========> AI 병렬 호출 완료 ===========>")
+            print(f"총 소요시간: {end_time - start_time:.2f}초")
+            print(f"성공률: {success_count}/{len(queries)}개")
+            print(f"평균 소요시간: {(end_time - start_time)/len(queries):.2f}초")
+            
+            # 각 호출의 상세 정보 출력
+            for i, call_info in enumerate(call_infos):
+                if 'duration' in call_info:
+                    response_type = ""
+                    if successful_results[i].lower() == 'true':
+                        response_type = "True"
+                    elif successful_results[i].lower() == 'false':
+                        response_type = "False"
+                    else:
+                        response_type = f"{len(successful_results[i])}자"
+                    
+                    print(f"  {i+1}. API키: {call_info.get('api_key_type', 'UNKNOWN')}, "
+                          f"시간: {call_info['duration']:.2f}초, "
+                          f"결과: {response_type}")
+                else:
+                    print(f"  {i+1}. 실패: {call_info.get('error', '알 수 없는 오류')}")
+            print(f"=========================================>")
+        
+        return successful_results
         
         # Filter out exceptions and log them
         successful_results = []
         for i, result in enumerate(results):
             if isinstance(result, Exception):
-                if self.debug:
-                    print(f"    │  [PARALLEL-ERROR] 쿼리 {i} 실패: {result}")
                 successful_results.append('')  # Empty result for failed queries
             else:
                 successful_results.append(result)
-        
-        if self.debug:
-            end_time = time.time()
-            success_count = len([r for r in successful_results if r])
-            print(f"    ┌─ [PARALLEL] 병렬 호출 완료")
-            print(f"    │  소요시간: {end_time - start_time:.2f}초")
-            print(f"    │  성공률: {success_count}/{len(queries)}개")
-            print(f"    └─ 완료")
         
         return successful_results
     

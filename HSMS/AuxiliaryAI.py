@@ -1,7 +1,7 @@
 import asyncio
 import re
 from config import (API_KEY, LOAD_API_KEYS, GEMINI_MODEL, CATEGORY_RELEVANCE_FINE, 
-                   NEW_TOPIC_FINE, CONVERSATION_SEPARATION_FINE, GROUP_SIMILARITY_FINE)
+                   NEW_TOPIC_FINE, CONVERSATION_SEPARATION_FINE, GROUP_SIMILARITY_FINE, ALL_MEMORY)
 from .AIManager import AIManager
 from .MemoryNode import MemoryNode
 
@@ -9,11 +9,12 @@ from .MemoryNode import MemoryNode
 class AuxiliaryAI:
     """보조 인공지능 - 계층적 기억 관리 시스템의 핵심 컨트롤러"""
     
-    def __init__(self, memory_manager, debug=False, max_depth=4):
+    def __init__(self, memory_manager, debug=False, max_depth=5, top_search_n=0):
         self.memory_manager = memory_manager
         self.ai_manager = AIManager(debug=debug)
         self.debug = debug  # 디버그 모드 활성화 여부
         self.max_depth = max_depth  # 트리 최대 깊이
+        self.top_search_n = top_search_n  # 반환할 최대 대화 수
         self._save_lock = asyncio.Lock()  # save_tree 동기화를 위한 락
 
     async def _safe_save_tree(self):
@@ -368,22 +369,13 @@ class AuxiliaryAI:
         if self.debug:
             print(f">> [CATEGORY] 카테고리 관련성 판단 ({len(categories)}개)")
             for name, desc in categories.items():
-                print(f">>>> [CATEGORY]   '{name}': {desc[:30]}...")
-            print(f">> [CATEGORY] AI 병렬 판단 시작...")
+                print(f">>>> [CATEGORY]   '{name}': {desc[:50]}...")
         
         try:
             # 여러 API 키를 사용한 병렬 처리
-            if self.debug:
-                print(f">> [DEBUG] call_ai_async_multiple 호출 준비")
-                print(f">> [DEBUG] queries 개수: {len(queries)}")
-                print(f">> [DEBUG] LOAD_API_KEYS 개수: {len(LOAD_API_KEYS) if LOAD_API_KEYS else 0}")
-            
             results = await self.ai_manager.call_ai_async_multiple(
                 queries, system_prompt, fine=CATEGORY_RELEVANCE_FINE
             )
-            
-            if self.debug:
-                print(f">> [CATEGORY] 병렬 판단 완료")
             
             # 결과 파싱
             relevance = {}
@@ -391,12 +383,13 @@ class AuxiliaryAI:
                 category_name = category_names[i]
                 value = result.strip().lower()
                 relevance[category_name] = value in ['true', '참', 'yes']
-                if self.debug and relevance[category_name]:
-                    print(f">>>> [CATEGORY] 관련: '{category_name}'")
             
             if self.debug:
                 relevant_count = sum(relevance.values())
                 print(f">> [CATEGORY] 최종 결과: {relevant_count}/{len(categories)}개 관련")
+                for name, is_relevant in relevance.items():
+                    if is_relevant:
+                        print(f">>>> [CATEGORY] 관련: '{name}'")
             
             return relevance
         except Exception as e:
@@ -553,7 +546,14 @@ class AuxiliaryAI:
     
     async def _separate_conversation_by_categories(self, user_input, ai_response, categories):
         """대화 내용을 카테고리별로 분리합니다."""
-        system_prompt = """대화 내용을 주제별로 분리하라.
+        from config import CONVERSATION_SEPARATION_FINE
+        
+        # Few-shot 예제들을 시스템 프롬프트에 포함
+        few_shot_examples = "\n\n예시:\n"
+        for i, (example_input, expected_output) in enumerate(CONVERSATION_SEPARATION_FINE, 1):
+            few_shot_examples += f"예시 {i}:\n{example_input}\n답변:\n{expected_output}\n\n"
+        
+        system_prompt = f"""대화 내용을 주제별로 분리하라.
 
 사용자의 대화와 AI의 응답을 분석하여, 각 카테고리와 관련된 부분만을 추출하라.
 한 대화에서 여러 주제가 다뤄질 수 있으므로, 각 카테고리에 해당하는 내용만 정확히 분리하라.
@@ -564,9 +564,10 @@ class AuxiliaryAI:
 AI: [해당 카테고리와 관련된 AI 응답 부분]
 
 카테고리명:
-사용자: [해당 카테고리와 관련된 사용자 발언 부분]
+사용자: [해당 카테고리와 관련된 사용자 발언 부분]  
 AI: [해당 카테고리와 관련된 AI 응답 부분]
-..."""
+
+{few_shot_examples}"""
         
         categories_list = ", ".join(categories)
         prompt = f"""관련 카테고리들: {categories_list}
@@ -577,56 +578,83 @@ AI 응답: {ai_response}
 위 대화를 각 카테고리별로 관련된 부분만 분리하여 출력하라."""
         
         if self.debug:
-            print(f">> [DEBUG] === AI에게 대화 분리 요청 ===")
-            print(f">> [DEBUG] 분리 대상 카테고리: {categories_list}")
-            print(f"|| 요청중: AI 분리 요청 시작...")
+            print(f"===========> AI 호출 시작 ===========>")
+            print(f"호출 대상: 대화 분리")
+            print(f"분리 카테고리: {categories_list}")
+            print(f"=========================================>")
         
         try:
-            result = await self.ai_manager.call_ai_async_single(prompt, system_prompt, fine=CONVERSATION_SEPARATION_FINE)
+            result = await self.ai_manager.call_ai_async_single(prompt, system_prompt)
             
             if self.debug:
-                print(f">> [DEBUG] AI 분리 결과:")
-                print(f">> [DEBUG]\n{result}")
-                print(f">> [DEBUG] === 분리 결과 파싱 시작 ===")
+                print(f"===========> AI 호출 완료 ===========>")
+                print(f"분리 결과 파싱 시작")
+                print(f"=========================================>")
             
-            # 결과 파싱
+            # 결과 파싱 개선
             separated = {}
             current_category = None
             current_user = ""
             current_ai = ""
             
-            for line in result.strip().split('\n'):
+            lines = result.strip().split('\n')
+            for line in lines:
                 line = line.strip()
-                if line.endswith(':') and line[:-1] in categories:
-                    # 이전 카테고리 저장
-                    if current_category:
-                        separated[current_category] = {
-                            'user': current_user,
-                            'ai': current_ai
-                        }
+                if not line:
+                    continue
+                    
+                # 카테고리 시작 감지 (더 유연하게)
+                for category in categories:
+                    if line.startswith(category + ':') or line == category + ':':
+                        # 이전 카테고리 저장
+                        if current_category and (current_user or current_ai):
+                            separated[current_category] = {
+                                'user': current_user.strip(),
+                                'ai': current_ai.strip()
+                            }
+                            if self.debug:
+                                print(f"파싱완료: '{current_category}' -> 사용자: '{current_user.strip()}', AI: '{current_ai.strip()}'")
+                        
+                        # 새 카테고리 시작
+                        current_category = category
+                        current_user = ""
+                        current_ai = ""
                         if self.debug:
-                            print(f"|| 파싱완료: '{current_category}': 사용자='{current_user}', AI='{current_ai}'")
-                    # 새 카테고리 시작
-                    current_category = line[:-1]
-                    current_user = ""
-                    current_ai = ""
-                    if self.debug:
-                        print(f">> [DEBUG] 새 카테고리 시작: '{current_category}'")
-                elif line.startswith('사용자:'):
-                    current_user = line[4:].strip()
-                elif line.startswith('AI:'):
-                    current_ai = line[3:].strip()
+                            print(f"새 카테고리 시작: '{current_category}'")
+                        break
+                else:
+                    # 카테고리가 아닌 라인 처리
+                    if line.startswith('사용자:'):
+                        current_user = line[4:].strip()
+                    elif line.startswith('AI:'):
+                        current_ai = line[3:].strip()
             
             # 마지막 카테고리 저장
-            if current_category:
+            if current_category and (current_user or current_ai):
                 separated[current_category] = {
-                    'user': current_user,
-                    'ai': current_ai
+                    'user': current_user.strip(),
+                    'ai': current_ai.strip()
                 }
+                if self.debug:
+                    print(f"마지막 카테고리 저장: '{current_category}' -> 사용자: '{current_user.strip()}', AI: '{current_ai.strip()}'")
+            
+            # 분리되지 않은 카테고리는 원본 대화 사용
+            for category in categories:
+                if category not in separated:
+                    separated[category] = {
+                        'user': user_input,
+                        'ai': ai_response
+                    }
+                    if self.debug:
+                        print(f"원본 대화 사용: '{category}'")
             
             return separated
+            
         except Exception as e:
-            print(f"|| 오류: 대화 분리 중 오류: {e}")
+            if self.debug:
+                print(f"===========> AI 호출 오류 ===========>")
+                print(f"오류: 대화 분리 중 오류: {e}")
+                print(f"=========================================>")
             # 오류 시 원본 대화를 모든 카테고리에 할당
             return {cat: {'user': user_input, 'ai': ai_response} for cat in categories}
     
@@ -671,24 +699,43 @@ AI 응답: {ai_response}
     
     async def _generate_category_name_async(self, user_input):
         """AI를 사용하여 새로운 카테고리명을 생성합니다."""
-        system_prompt = """대화 내용을 분석하여 적절한 카테고리명을 생성하라.
+        from config import CATEGORY_NAME_FINE
+        
+        # Few-shot 예제들을 시스템 프롬프트에 포함
+        few_shot_examples = "\n\n예시:\n"
+        for i, (example_input, expected_output) in enumerate(CATEGORY_NAME_FINE, 1):
+            few_shot_examples += f"예시 {i}:\n{example_input}\n답변: {expected_output}\n\n"
+        
+        system_prompt = f"""대화 내용을 분석하여 적절한 카테고리명을 생성하라.
 
 사용자의 대화 내용을 분석하고, 이 대화가 속할 수 있는 가장 적절한 카테고리명을 생성하라.
 카테고리명은 간결하고 포괄적이어야 하며, 2-8글자 정도로 작성하라.
 
-예시:
-- 컴퓨터, SSD에 대한 대화 → "기술"
-- 인류 역사에 대한 대화 → "역사"
-- 게임에 대한 대화 → "게임"
-- 여행 이야기 → "여행"
+중요한 규칙:
+1. 특수문자나 기호(*, **, -, [], (), 등)는 절대 사용하지 마라
+2. 한글 또는 영어만 사용하라
+3. 단 하나의 카테고리명만 출력하라
+4. 간결하고 명확하게 작성하라
+5. 카테고리명에 설명을 추가하지 마라
 
-단 하나의 카테고리명만 출력하라."""
+{few_shot_examples}"""
         
-        prompt = f"사용자 대화: {user_input}\n\n이 대화에 적합한 카테고리명을 생성하라."
+        prompt = f"사용자 대화: {user_input}\n\n이 대화에 적합한 카테고리명을 하나만 생성하라. 2-8글자로 간결하게 작성하고, 특수문자나 기호는 사용하지 마라."
         
         try:
             result = await self.ai_manager.call_ai_async_single(prompt, system_prompt)
             category_name = result.strip()
+            
+            # 특수문자 제거 및 정리
+            import re
+            # 대괄호나 기타 특수문자 제거
+            category_name = re.sub(r'[\[\]*\-(){},".:;!?]', '', category_name)
+            # 연속된 공백을 하나로 변환
+            category_name = re.sub(r'\s+', ' ', category_name)
+            category_name = category_name.strip()
+            
+            # 앞뒤 따옴표 제거
+            category_name = category_name.strip('\'"')
             
             # 카테고리명이 너무 길거나 비어있으면 기본값 사용
             if not category_name or len(category_name) > 10:
@@ -1401,83 +1448,177 @@ IMPORTANT: 오직 그룹명만 답변하라. 설명이나 다른 텍스트는 �
                 print(f">>>> [ERROR] 통합 요약 생성 오류: {e}")
             return " / ".join(summaries[:2])  # 실패 시 간단 결합
     
-    async def search_relevant_memories(self, user_input):
-        """사용자 입력과 관련된 기억을 검색합니다."""
-        if self.debug:
-            print(f"  ┌─ [SEARCH] 기억 검색 실행")
-            print(f"  │  검색어: '{user_input[:50]}{'...' if len(user_input) > 50 else ''}'")
-        
-        # 1. 전체 노드에서 관련성 높은 노드 찾기
-        relevant_nodes = []
-        
-        if not self.memory_manager.memory_tree:
-            if self.debug:
-                print(f"  │  결과: 빈 기억 트리")
-                print(f"  └─ [SEARCH] 검색 완료")
-            return ""
-        
-        # 2. 모든 노드 검사 (루트 제외)
-        for node_id, node in self.memory_manager.memory_tree.items():
-            if node.topic == "ROOT":
-                continue
-            
-            # 토픽과 요약에서 키워드 매칭
-            combined_text = f"{node.topic} {node.summary}".lower()
-            input_lower = user_input.lower()
-            
-            # 간단한 키워드 매칭
-            keywords = input_lower.split()
-            matches = sum(1 for keyword in keywords if keyword in combined_text)
-            
-            if matches > 0:
-                # 대화 내용도 확인
-                conversations_text = ""
-                for conv_idx in node.conversation_indexes:
-                    try:
-                        all_memory = self.memory_manager.data_manager.load_json(
-                            self.memory_manager.data_manager.ALL_MEMORY
-                        )
-                        if conv_idx < len(all_memory):
-                            conv = all_memory[conv_idx]
-                            for msg in conv:
-                                conversations_text += f"{msg.get('content', '')} "
-                    except:
-                        continue
-                
-                relevant_nodes.append({
-                    'node': node,
-                    'relevance': matches,
-                    'conversations': conversations_text[:500]  # 처음 500자만
-                })
-        
-        if self.debug:
-            print(f"  │  발견된 노드: {len(relevant_nodes)}개")
-        
         # 3. 관련성 순으로 정렬
         relevant_nodes.sort(key=lambda x: x['relevance'], reverse=True)
         
-        # 4. 상위 3개 노드의 내용 조합
-        result_data = []
-        for item in relevant_nodes[:3]:
-            node = item['node']
-            conversations = item['conversations']
-            
-            node_info = f"[{node.topic}] {node.summary}"
-            if conversations.strip():
-                node_info += f"\n관련 대화: {conversations[:200]}..."
-            
-            result_data.append(node_info)
+    async def search_relevant_memories(self, user_input):
+        """사용자 입력과 관련된 기억을 계층적으로 검색합니다."""
+        if self.debug:
+            print(f"\n===========> 기억 검색 시작 (계층적 탐색) ===========>")
+            print(f"검색어: '{user_input}'")
+            print(f"=====================================>")
         
-        result = "\n\n".join(result_data)
+        if not self.memory_manager.memory_tree:
+            if self.debug:
+                print(f"===========> 검색 결과 <===========>")
+                print(f"결과: 빈 기억 트리")
+                print(f"==================================>")
+            return ""
+        
+        # 계층적 탐색 실행
+        relevant_conversations = await self._hierarchical_search(user_input)
+        
+        # 최종 결과 구성
+        if relevant_conversations:
+            # top_search_n이 0이면 모든 대화 반환, 아니면 지정된 수만큼 반환
+            limit = len(relevant_conversations) if self.top_search_n == 0 else self.top_search_n
+            result_parts = []
+            for conv_data in relevant_conversations[:limit]:
+                conv_idx = conv_data['index']
+                conv = conv_data['conversation']
+                
+                conversation_text = f"======{conv_idx}번 대화======"
+                for msg in conv:
+                    role = "사용자" if msg.get('role') == 'user' else "AI"
+                    content = msg.get('content', '')
+                    conversation_text += f"\n{role}: {content}"
+                conversation_text += "\n=================="
+                result_parts.append(conversation_text)
+            
+            result = "\n\n".join(result_parts) + "\n\n위 기억을 참고해서 응답해라."
+        else:
+            result = ""
         
         if self.debug:
-            if result:
-                print(f"  │  반환 데이터: {len(result)}자")
+            print(f"\n===========> 검색 결과 <===========>")
+            if relevant_conversations:
+                print(f"발견된 관련 대화: {len(relevant_conversations)}개")
+                limit = len(relevant_conversations) if self.top_search_n == 0 else min(self.top_search_n, len(relevant_conversations))
+                print(f"반환할 대화: {limit}개")
+                print(f"총 {len(result)}자의 기억 데이터 반환")
             else:
-                print(f"  │  결과: 관련 기억 없음")
-            print(f"  └─ [SEARCH] 검색 완료")
+                print(f"관련 기억 없음")
+            print(f"==================================>")
         
         return result
+    
+    async def _hierarchical_search(self, user_input):
+        """계층적 탐색을 수행하여 관련 대화를 찾습니다."""
+        # 1. ROOT 노드에서 시작
+        root_node = self.memory_manager.get_root_node()
+        if not root_node or not root_node.children_ids:
+            return []
+        
+        # 2. 최상위 카테고리 노드들 평가 (1단계)
+        candidate_nodes = []  # 탐색 후보 노드들
+        
+        top_level_nodes = [self.memory_manager.get_node(child_id) 
+                          for child_id in root_node.children_ids 
+                          if self.memory_manager.get_node(child_id)]
+        
+        if self.debug:
+            print(f"1단계: 최상위 카테고리 {len(top_level_nodes)}개 평가 중...")
+        
+        # 최상위 노드들의 관련성 병렬 평가
+        relevant_top_nodes = await self._evaluate_nodes_relevance(user_input, top_level_nodes)
+        
+        # 3. 관련 있는 최상위 노드들의 하위 노드를 탐색 후보에 추가
+        for node in relevant_top_nodes:
+            candidate_nodes.append(node)
+            # 하위 노드들도 후보에 추가
+            for child_id in node.children_ids:
+                child_node = self.memory_manager.get_node(child_id)
+                if child_node:
+                    candidate_nodes.append(child_node)
+        
+        if self.debug:
+            print(f"2단계: 탐색 후보 노드 {len(candidate_nodes)}개 수집 완료")
+        
+        # 4. 후보 노드들을 계층별로 분리하여 깊이 우선 탐색
+        final_conversations = []
+        processed_nodes = set()
+        
+        for candidate in candidate_nodes:
+            if candidate.node_id in processed_nodes:
+                continue
+            processed_nodes.add(candidate.node_id)
+            
+            # 리프 노드(실제 대화가 있는 노드)인지 확인
+            if hasattr(candidate, 'conversation_indices') and candidate.conversation_indices:
+                # 실제 대화 내용 수집
+                for conv_idx in candidate.conversation_indices:
+                    try:
+                        all_memory = self.memory_manager.data_manager.load_json(ALL_MEMORY)
+                        if conv_idx < len(all_memory):
+                            conv = all_memory[conv_idx]
+                            final_conversations.append({
+                                'index': conv_idx,
+                                'conversation': conv,
+                                'node_topic': candidate.topic
+                            })
+                    except:
+                        continue
+        
+        if self.debug:
+            print(f"3단계: 최종 대화 {len(final_conversations)}개 수집 완료")
+        
+        return final_conversations
+    
+    async def _evaluate_nodes_relevance(self, user_input, nodes):
+        """노드들의 관련성을 병렬로 평가합니다."""
+        if not nodes:
+            return []
+        
+        # 병렬 평가를 위한 쿼리 생성
+        queries = []
+        node_info = []
+        
+        for node in nodes:
+            query = f"""사용자 질문: "{user_input}"
+
+노드 정보:
+주제: {node.topic}
+요약: {node.summary}
+
+이 노드가 사용자 질문과 관련이 있습니까? 관련이 있다면 "True", 없다면 "False"로 답하세요."""
+            queries.append(query)
+            node_info.append({
+                'node': node,
+                'topic': node.topic
+            })
+        
+        system_prompt = """노드의 주제와 요약을 보고 사용자 질문과의 관련성을 판단하세요.
+관련성이 있으면 "True", 없으면 "False"로만 답하세요.
+부분적으로라도 관련이 있다면 True로 판단하세요."""
+        
+        if self.debug:
+            # 병렬 시작 메시지
+            print(f"===========> AI 병렬 호출 시작 ===========>")
+            print(f"호출 대상: 노드 관련성 평가")
+            print(f"호출 수량: {len(queries)}개")
+            for i, info in enumerate(node_info):
+                print(f"  {i+1}. 노드: '{info['topic']}'")
+            print(f"=========================================>")
+        
+        # 병렬 AI 호출
+        results = await self.ai_manager.call_ai_async_multiple(queries, system_prompt)
+        
+        # 결과 처리
+        relevant_nodes = []
+        for i, result in enumerate(results):
+            if result.strip().lower() in ['true', '참', 'yes']:
+                relevant_nodes.append(node_info[i]['node'])
+        
+        if self.debug:
+            # 병렬 완료 메시지  
+            print(f"===========> AI 병렬 호출 완료 ===========>")
+            print(f"총 소요시간: 병렬 처리 완료")
+            print(f"관련 노드 발견: {len(relevant_nodes)}개")
+            for node in relevant_nodes:
+                print(f"  - '{node.topic}'")
+            print(f"=========================================>")
+        
+        return relevant_nodes
     
     async def _generate_conversation_topic(self, user_input):
         """사용자 입력을 기반으로 대화의 구체적인 주제를 생성합니다."""
@@ -1538,24 +1679,71 @@ IMPORTANT: 오직 그룹명만 답변하라. 설명이나 다른 텍스트는 �
             return f"대화 요약: {conversation[0]['content'][:50]}..."
     
     async def _evaluate_category_relevance(self, user_input, existing_categories):
-        """사용자 입력과 기존 카테고리들의 관련성을 평가합니다."""
+        """사용자 입력과 기존 카테고리들의 관련성을 병렬로 평가합니다."""
         if not existing_categories:
             return []
         
         try:
-            relevant_categories = []
+            from config import CATEGORY_RELEVANCE_FINE
+            
+            # 병렬 처리를 위한 쿼리 생성
+            queries = []
+            category_info = []
+            
             for category in existing_categories:
-                # AI를 사용한 관련성 판단
-                system_prompt = f"""사용자의 발언이 '{category}' 카테고리와 관련이 있는지 판단하라.
-관련이 있으면 "True", 없으면 "False"로만 답변하라."""
+                # Few-shot 예제를 포함한 프롬프트 구성
+                few_shot_examples = "\n\n예시:\n"
+                for i, (example_input, expected_output) in enumerate(CATEGORY_RELEVANCE_FINE, 1):
+                    few_shot_examples += f"예시 {i}:\n{example_input}\n답변:\n{expected_output}\n\n"
                 
-                prompt = f"사용자 발언: '{user_input}'"
-                result = await self.ai_manager.call_ai_async_single(prompt, system_prompt)
+                query = f"""기존 카테고리들:
+{category}: {category}에 대한 모든 대화를 관리하는 카테고리입니다
+
+사용자 대화: {user_input}
+
+위 대화가 각 카테고리와 관련이 있는지 판단하고, 다음 형식으로 답변하라:
+{category}: True/False
+
+{few_shot_examples}"""
                 
-                if result.strip().lower() == 'true':
+                queries.append(query)
+                category_info.append(category)
+            
+            system_prompt = """사용자 대화를 분석하여 각 카테고리와의 관련성을 판단하라.
+부분적으로라도 관련이 있으면 True로 판단하고, 전혀 관련이 없으면 False로 판단하라.
+정확히 요청된 형식으로만 답변하라."""
+            
+            if self.debug and len(queries) > 1:
+                # 병렬 시작 메시지
+                print(f"===========> AI 병렬 호출 시작 ===========>")
+                print(f"호출 대상: 카테고리 관련성 평가")
+                print(f"호출 수량: {len(queries)}개")
+                for i, category in enumerate(category_info):
+                    print(f"  {i+1}. 카테고리: '{category}'")
+                print(f"=========================================>")
+            
+            # 병렬 AI 호출
+            results = await self.ai_manager.call_ai_async_multiple(queries, system_prompt)
+            
+            # 결과 처리
+            relevant_categories = []
+            for i, result in enumerate(results):
+                category = category_info[i]
+                # 결과에서 True/False 추출
+                if f"{category}: True" in result or result.strip().lower() == 'true':
                     relevant_categories.append(category)
             
+            if self.debug and len(queries) > 1:
+                # 병렬 완료 메시지
+                print(f"===========> AI 병렬 호출 완료 ===========>")
+                print(f"총 소요시간: 병렬 처리 완료")
+                print(f"관련 카테고리 발견: {len(relevant_categories)}개")
+                for category in relevant_categories:
+                    print(f"  - '{category}'")
+                print(f"=========================================>")
+            
             return relevant_categories
+            
         except Exception as e:
             if self.debug:
                 print(f">>>> [ERROR] 카테고리 관련성 평가 오류: {e}")
@@ -1577,20 +1765,30 @@ IMPORTANT: 오직 그룹명만 답변하라. 설명이나 다른 텍스트는 �
         # 자식 노드들 중에서 유사한 주제 찾기
         for child_id in category_node.children_ids:
             child_node = self.memory_manager.get_node(child_id)
-            if child_node and self._is_similar_topic(user_input, child_node.topic):
-                child_node.conversation_indexes.append(conversation_index)
+            if child_node and await self._is_similar_topic_ai(user_input, child_node.topic):
+                child_node.conversation_indices.append(conversation_index)
                 await self._safe_save_tree()
                 return True
         
         return False
     
-    def _is_similar_topic(self, user_input, existing_topic):
-        """두 주제가 유사한지 간단히 판단합니다."""
-        user_words = set(user_input.lower().split())
-        topic_words = set(existing_topic.lower().split())
+    async def _is_similar_topic_ai(self, user_input, existing_topic):
+        """AI를 사용하여 두 주제가 유사한지 판단합니다."""
+        system_prompt = """사용자 입력과 기존 주제가 같은 범주나 유사한 내용을 다루는지 판단하세요.
+유사하다면 "True", 다르다면 "False"로만 답하세요."""
         
-        # 공통 단어가 있으면 유사한 것으로 판단
-        return len(user_words & topic_words) > 0
+        prompt = f"""사용자 입력: "{user_input}"
+기존 주제: "{existing_topic}"
+
+이 둘이 유사한 주제를 다루고 있습니까?"""
+        
+        try:
+            result = await self.ai_manager.call_ai_async_single(prompt, system_prompt)
+            return result.strip().lower() in ['true', '참', 'yes']
+        except Exception as e:
+            if self.debug:
+                print(f">>>> [ERROR] AI 주제 유사도 판단 오류: {e}")
+            return False
     
     async def _fallback_merge_to_similar_category(self, conversation, conversation_index, user_input):
         """유사한 카테고리를 찾아서 병합합니다."""
@@ -1601,7 +1799,7 @@ IMPORTANT: 오직 그룹명만 답변하라. 설명이나 다른 텍스트는 �
         
         for child_id in root_node.children_ids:
             child_node = self.memory_manager.get_node(child_id)
-            if child_node and self._is_similar_topic(user_input, child_node.topic):
+            if child_node and await self._is_similar_topic_ai(user_input, child_node.topic):
                 # 이 카테고리에 추가
                 await self._add_to_existing_category(conversation, conversation_index, child_node.topic, user_input)
                 return True
@@ -1773,28 +1971,67 @@ IMPORTANT: 오직 그룹명만 답변하라. 설명이나 다른 텍스트는 �
                     await self._add_to_existing_category(conversation, conversation_index, category_name, user_input)
     
     async def _find_most_similar_leaf(self, category_node, user_input):
-        """카테고리 내에서 가장 유사한 리프 노드를 찾습니다."""
+        """카테고리 내에서 가장 유사한 리프 노드를 AI 기반으로 찾습니다."""
         best_leaf = None
-        best_score = 0
         
+        leaf_nodes = []
         for child_id in category_node.children_ids:
             child_node = self.memory_manager.get_node(child_id)
             if child_node and child_node.coordinates.get("start", -1) >= 0:  # 리프 노드
-                # 유사도 점수 계산 (간단한 키워드 매칭)
-                score = self._calculate_similarity_score(user_input, child_node.summary)
-                if score > best_score:
-                    best_score = score
-                    best_leaf = child_node
+                leaf_nodes.append(child_node)
+        
+        if not leaf_nodes:
+            return None
+        
+        if len(leaf_nodes) == 1:
+            return leaf_nodes[0]
+        
+        # AI를 사용한 병렬 유사도 판단
+        queries = []
+        for node in leaf_nodes:
+            query = f"""사용자 입력: "{user_input}"
+
+기존 리프 노드:
+주제: {node.topic}
+요약: {node.summary}
+
+이 리프 노드가 사용자 입력과 유사한 주제를 다루고 있습니까? 
+유사하다면 "True", 아니라면 "False"로 답하세요."""
+            queries.append(query)
+        
+        system_prompt = """리프 노드의 주제와 요약을 보고 사용자 입력과의 주제 유사성을 판단하세요.
+같은 카테고리 내에서 병합 가능할 정도로 유사하면 "True", 다른 주제라면 "False"로 답하세요."""
+        
+        # 병렬 AI 호출
+        results = await self.ai_manager.call_ai_async_multiple(
+            queries, system_prompt
+        )
+        
+        # 가장 유사한 노드 선택 (첫 번째 True 결과)
+        for i, result in enumerate(results):
+            if result.strip().lower() in ['true', '참', 'yes']:
+                best_leaf = leaf_nodes[i]
+                break
         
         return best_leaf
     
-    def _calculate_similarity_score(self, text1, text2):
-        """두 텍스트의 간단한 유사도 점수를 계산합니다."""
-        words1 = set(text1.split())
-        words2 = set(text2.split())
-        intersection = words1.intersection(words2)
-        union = words1.union(words2)
-        return len(intersection) / len(union) if union else 0
+    async def _calculate_similarity_ai(self, text1, text2):
+        """AI를 사용하여 두 텍스트의 유사도를 판단합니다."""
+        system_prompt = """두 텍스트가 유사한 주제나 내용을 다루고 있는지 판단하세요.
+유사하다면 "True", 다르다면 "False"로만 답하세요."""
+        
+        prompt = f"""텍스트 1: "{text1}"
+텍스트 2: "{text2}"
+
+이 두 텍스트가 유사한 주제를 다루고 있습니까?"""
+        
+        try:
+            result = await self.ai_manager.call_ai_async_single(prompt, system_prompt)
+            return result.strip().lower() in ['true', '참', 'yes']
+        except Exception as e:
+            if self.debug:
+                print(f">>>> [ERROR] AI 유사도 판단 오류: {e}")
+            return False
     
     async def _update_summary_with_merge(self, current_summary, new_user_content, new_ai_content):
         """병합 시 요약을 업데이트합니다."""
