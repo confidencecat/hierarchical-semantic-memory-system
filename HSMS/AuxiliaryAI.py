@@ -1503,66 +1503,82 @@ IMPORTANT: 오직 그룹명만 답변하라. 설명이나 다른 텍스트는 �
         return result
     
     async def _hierarchical_search(self, user_input):
-        """계층적 탐색을 수행하여 관련 대화를 찾습니다."""
-        # 1. ROOT 노드에서 시작
+        """계층적 심층 탐색을 수행하여 관련 대화를 찾습니다. (수정된 로직)"""
         root_node = self.memory_manager.get_root_node()
         if not root_node or not root_node.children_ids:
             return []
-        
-        # 2. 최상위 카테고리 노드들 평가 (1단계)
-        candidate_nodes = []  # 탐색 후보 노드들
-        
-        top_level_nodes = [self.memory_manager.get_node(child_id) 
-                          for child_id in root_node.children_ids 
-                          if self.memory_manager.get_node(child_id)]
-        
-        if self.debug:
-            print(f"1단계: 최상위 카테고리 {len(top_level_nodes)}개 평가 중...")
-        
-        # 최상위 노드들의 관련성 병렬 평가
-        relevant_top_nodes = await self._evaluate_nodes_relevance(user_input, top_level_nodes)
-        
-        # 3. 관련 있는 최상위 노드들의 하위 노드를 탐색 후보에 추가
-        for node in relevant_top_nodes:
-            candidate_nodes.append(node)
-            # 하위 노드들도 후보에 추가
-            for child_id in node.children_ids:
-                child_node = self.memory_manager.get_node(child_id)
-                if child_node:
-                    candidate_nodes.append(child_node)
-        
-        if self.debug:
-            print(f"2단계: 탐색 후보 노드 {len(candidate_nodes)}개 수집 완료")
-        
-        # 4. 후보 노드들을 계층별로 분리하여 깊이 우선 탐색
+
         final_conversations = []
-        processed_nodes = set()
-        
-        for candidate in candidate_nodes:
-            if candidate.node_id in processed_nodes:
-                continue
-            processed_nodes.add(candidate.node_id)
-            
-            # 리프 노드(실제 대화가 있는 노드)인지 확인
-            if hasattr(candidate, 'conversation_indices') and candidate.conversation_indices:
-                # 실제 대화 내용 수집
-                for conv_idx in candidate.conversation_indices:
-                    try:
-                        all_memory = self.memory_manager.data_manager.load_json(ALL_MEMORY)
-                        if conv_idx < len(all_memory):
-                            conv = all_memory[conv_idx]
-                            final_conversations.append({
-                                'index': conv_idx,
-                                'conversation': conv,
-                                'node_topic': candidate.topic
-                            })
-                    except:
-                        continue
+        processed_conversation_indices = set()
+
+        # 탐색 큐: (node_id, depth) 튜플을 저장
+        queue = [(child_id, 1) for child_id in root_node.children_ids]
         
         if self.debug:
-            print(f"3단계: 최종 대화 {len(final_conversations)}개 수집 완료")
+            print(f"\n>> [SEARCH-DEEP] 심층 탐색 시작")
+            print(f"  [DEPTH 0] 루트에서 탐색 시작. {len(queue)}개 최상위 카테고리 평가.")
+
+        current_depth = 0
+        while queue:
+            # 현재 깊이의 노드들만 추출
+            nodes_at_current_depth = [item for item in queue if item[1] == current_depth + 1]
+            if not nodes_at_current_depth:
+                break
+            
+            current_depth += 1
+            # 다음 깊이로 넘어갈 노드들을 큐에서 제거
+            queue = [item for item in queue if item[1] > current_depth]
+
+            nodes_to_evaluate = [self.memory_manager.get_node(node_id) for node_id, _ in nodes_at_current_depth if self.memory_manager.get_node(node_id)]
+            
+            if not nodes_to_evaluate:
+                continue
+
+            if self.debug:
+                print(f"\n>> [SEARCH-DEEP] 깊이 {current_depth} 탐색 ({len(nodes_to_evaluate)}개 노드 평가)")
+
+            relevant_nodes = await self._evaluate_nodes_relevance(user_input, nodes_to_evaluate)
+            
+            if self.debug:
+                print(f"  [DEPTH {current_depth}] 관련 노드 {len(relevant_nodes)}개 발견: {[node.topic for node in relevant_nodes]}")
+
+            for node in relevant_nodes:
+                # 자식 노드가 있으면 다음 탐색 큐에 추가 (부모 노드의 역할)
+                if node.children_ids:
+                    if self.debug:
+                        print(f"    [SEARCH-BRANCH] 부모 노드 '{node.topic}' 관련. {len(node.children_ids)}개 자식 노드 탐색 대기.")
+                    for child_id in node.children_ids:
+                        child_node = self.memory_manager.get_node(child_id)
+                        if child_node:
+                            queue.append((child_id, current_depth + 1))
+                # 자식 노드가 없는 리프 노드일 경우에만 대화 수집
+                elif hasattr(node, 'conversation_indices') and node.conversation_indices:
+                    if self.debug:
+                        print(f"    [SEARCH-LEAF] 리프 노드 '{node.topic}' 관련. {len(node.conversation_indices)}개 대화 수집.")
+                    for conv_idx in node.conversation_indices:
+                        if conv_idx not in processed_conversation_indices:
+                            try:
+                                all_memory = self.memory_manager.data_manager.load_json(ALL_MEMORY)
+                                if conv_idx < len(all_memory):
+                                    conv = all_memory[conv_idx]
+                                    final_conversations.append({
+                                        'index': conv_idx,
+                                        'conversation': conv,
+                                        'node_topic': node.topic
+                                    })
+                                    processed_conversation_indices.add(conv_idx)
+                            except Exception as e:
+                                if self.debug:
+                                    print(f"    [WARN] 대화 인덱스 {conv_idx} 로드 실패: {e}")
         
-        return final_conversations
+        if self.debug:
+            print(f"\n>> [SEARCH-DEEP] 심층 탐색 완료. 총 {len(final_conversations)}개 관련 대화 발견.")
+        
+        # 중복 제거 및 정렬
+        unique_conversations = {conv['index']: conv for conv in final_conversations}
+        sorted_conversations = sorted(unique_conversations.values(), key=lambda x: x['index'])
+        
+        return sorted_conversations
     
     async def _evaluate_nodes_relevance(self, user_input, nodes):
         """노드들의 관련성을 병렬로 평가합니다."""

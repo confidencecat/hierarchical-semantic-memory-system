@@ -74,6 +74,16 @@ def parse_arguments():
         default=0,
         help='검색 결과에서 반환할 최대 대화 수 (0이면 모든 관련 대화 반환, 기본값: 0)'
     )
+    parser.add_argument(
+        '--question',
+        type=str,
+        help='(테스트용) chat 모드에서 단일 질문을 처리하고 종료합니다.'
+    )
+    parser.add_argument(
+        '--no-record',
+        action='store_true',
+        help='대화를 기억 시스템에 저장하지 않습니다 (단순 응답 모드).'
+    )
     
     args = parser.parse_args()
     
@@ -244,27 +254,134 @@ async def run_test_mode(force_search=False, force_record=False, debug=False, max
     print(f"트리 구조:\n{final_status['tree_summary']}")
 
 
-async def run_chat_mode(force_search=False, force_record=False, debug=False, max_depth=4, top_search_n=0):
-    """대화형 모드로 실행합니다."""
+async def run_chat_mode(force_search=False, force_record=False, debug=False, max_depth=4, top_search_n=0, question=None, no_record=False):
+    """대화형 모드로 실행하며, 실시간 명령어를 지원합니다."""
+    
+    # 초기 설정값 출력
     print("=== 계층적 의미 기억 시스템 시작 (대화형 모드) ===")
-    if force_search:
-        print("|| 강제 검색 모드: 모든 대화에서 기억 탐색을 수행합니다.")
+    if no_record:
+        print("|| 저장 비활성화 모드: 대화가 기억 시스템에 저장되지 않습니다.")
     elif force_record:
         print("|| 기록 전용 모드: AI 응답 없이 정보만 저장합니다.")
+    elif force_search:
+        print("|| 강제 검색 모드: 모든 대화에서 기억 탐색을 수행합니다.")
     else:
         print("|| 효율 모드: 필요한 경우에만 기억 탐색을 수행합니다.")
+    
     if debug:
-        print(">> 디버그 모드: 상세 정보를 출력합니다.")
-    
-    main_ai_instance = MainAI(force_search=force_search, force_record=force_record, debug=debug, max_depth=max_depth, top_search_n=top_search_n)
-    
-    print("\n=== 대화형 모드 (종료하려면 'exit' 입력) ===")
+        print(">>> 디버그 모드: 상세 정보를 출력합니다.")
+
+    # AI 인스턴스 생성
+    main_ai_instance = MainAI(
+        force_search=force_search, 
+        force_record=force_record, 
+        debug=debug, 
+        max_depth=max_depth, 
+        top_search_n=top_search_n, 
+        no_record=no_record
+    )
+
+    # --question 인수가 있으면 해당 질문만 처리하고 종료
+    if question:
+        print(f"\n사용자: {question}")
+        start_time = time.time()
+        response = await main_ai_instance.chat_async(question)
+        end_time = time.time()
+        print(f"AI: {response}")
+        print(f"(처리 시간: {end_time - start_time:.2f}초)")
+        return
+
+    print("\n=== 대화형 모드 (도움말: !help, 종료: exit) ===")
     while True:
-        user_input = input("\n사용자: ")
+        user_input = input("\n사용자: ").strip()
+        
         if user_input.lower() in ['exit', 'quit', '종료', '그만']:
             print("AI: 대화를 종료합니다.")
             break
-        
+
+        # 명령어 처리 로직
+        if user_input.startswith('!'):
+            parts = user_input.split()
+            command = parts[0].lower()
+
+            if command == '!help':
+                print("""
+--- 명령어 도움말 ---
+!status         : 현재 모든 설정 상태를 표시합니다.
+!force-search   : 모든 대화에서 기억을 강제로 검색하는 모드를 켜고 끕니다.
+!force-record   : AI 응답 없이 대화를 기록만 하는 모드를 켜고 끕니다.
+!no-record      : 대화를 아예 저장하지 않는 모드를 켜고 끕니다.
+!debug          : 상세한 처리 과정을 보여주는 디버그 모드를 켜고 끕니다.
+!tree           : 현재 기억 트리 구조를 출력합니다.
+!api-info       : 설정된 API 키 정보를 보여줍니다.
+!max-depth [숫자] : 기억 트리의 최대 깊이를 설정합니다. (예: !max-depth 5)
+!help           : 이 도움말을 표시합니다.
+exit            : 프로그램을 종료합니다.
+--------------------""")
+                continue
+
+            elif command == '!status':
+                print(f"""
+--- 현재 설정 상태 ---
+- !force-search : {'ON' if main_ai_instance.force_search else 'OFF'}
+- !force-record : {'ON' if main_ai_instance.force_record else 'OFF'}
+- !no-record    : {'ON' if main_ai_instance.no_record else 'OFF'}
+- !debug        : {'ON' if main_ai_instance.debug else 'OFF'}
+- !max-depth    : {main_ai_instance.max_depth}
+--------------------""")
+                continue
+
+            elif command == '!tree':
+                show_tree_structure()
+                continue
+
+            elif command == '!api-info':
+                show_api_info()
+                continue
+
+            elif command == '!debug':
+                main_ai_instance.set_debug_mode(not main_ai_instance.debug)
+                continue
+
+            elif command == '!force-search':
+                main_ai_instance.force_search = not main_ai_instance.force_search
+                print(f">> [CONFIG] 강제 검색 모드가 {'ON' if main_ai_instance.force_search else 'OFF'}으로 설정되었습니다.")
+                continue
+
+            elif command == '!force-record':
+                new_state = not main_ai_instance.force_record
+                if new_state and main_ai_instance.no_record:
+                    print(">> [ERROR] !no-record가 ON 상태에서는 !force-record를 켤 수 없습니다.")
+                else:
+                    main_ai_instance.force_record = new_state
+                    print(f">> [CONFIG] 기록 전용 모드가 {'ON' if main_ai_instance.force_record else 'OFF'}으로 설정되었습니다.")
+                continue
+
+            elif command == '!no-record':
+                new_state = not main_ai_instance.no_record
+                if new_state and main_ai_instance.force_record:
+                    print(">> [ERROR] !force-record가 ON 상태에서는 !no-record를 켤 수 없습니다.")
+                else:
+                    main_ai_instance.no_record = new_state
+                    print(f">> [CONFIG] 저장 비활성화 모드가 {'ON' if main_ai_instance.no_record else 'OFF'}으로 설정되었습니다.")
+                continue
+            
+            elif command == '!max-depth':
+                if len(parts) > 1 and parts[1].isdigit():
+                    new_depth = int(parts[1])
+                    if new_depth >= 3:
+                        main_ai_instance.set_max_depth(new_depth)
+                    else:
+                        print(">> [ERROR] max-depth는 3 이상이어야 합니다.")
+                else:
+                    print(">> [ERROR] 사용법: !max-depth [숫자]")
+                continue
+
+            else:
+                print(f">> [ERROR] 알 수 없는 명령어입니다: {command}")
+                continue
+
+        # 일반 대화 처리
         start_time = time.time()
         response = await main_ai_instance.chat_async(user_input)
         end_time = time.time()
@@ -337,6 +454,11 @@ def main_ai(prompt='False', max_depth=4, top_search_n=0):
 if __name__ == '__main__':
     args = parse_arguments()
     
+    # --force-record와 --no-record 동시 사용 방지
+    if args.force_record and args.no_record:
+        print("오류: --force-record와 --no-record는 동시에 사용할 수 없습니다.")
+        exit(1)
+
     # force_search와 force_record는 동시에 사용할 수 없음
     if getattr(args, 'force_search', False) and getattr(args, 'force_record', False):
         print("오류: --force-search와 --force-record는 동시에 사용할 수 없습니다.")
@@ -375,12 +497,13 @@ if __name__ == '__main__':
     
     force_search = getattr(args, 'force_search', False)
     force_record = getattr(args, 'force_record', False)
+    no_record = getattr(args, 'no_record', False)
     
     if args.mode == 'test':
-        asyncio.run(run_test_mode(force_search=force_search, force_record=force_record, debug=args.debug, max_depth=args.max_depth, top_search_n=args.top_search_n))
+        asyncio.run(run_test_mode(force_search=force_search, force_record=force_record, debug=args.debug, max_depth=args.max_depth, top_search_n=args.top_search_n)) # no_record는 test 모드에서 의미 없음
     elif args.mode == 'chat':
-        asyncio.run(run_chat_mode(force_search=force_search, force_record=force_record, debug=args.debug, max_depth=args.max_depth, top_search_n=args.top_search_n))
+        asyncio.run(run_chat_mode(force_search=force_search, force_record=force_record, debug=args.debug, max_depth=args.max_depth, top_search_n=args.top_search_n, question=args.question, no_record=no_record))
     elif args.mode == 'discord':
-        run_discord_mode(debug=args.debug)
+        run_discord_mode(debug=args.debug) # Discord 봇은 자체적으로 상태 관리
     elif args.mode == 'search':
         asyncio.run(run_search_mode(debug=args.debug, max_depth=args.max_depth, top_search_n=args.top_search_n))

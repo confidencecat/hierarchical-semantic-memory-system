@@ -40,7 +40,7 @@ class TreeCleanupEngine:
         if self.debug:
             print(f"\n=== 트리 정리 엔진 시작 ===")
             print(f">> 설정: max_depth={self.max_depth}, fanout_limit={self.fanout_limit}")
-            print(f">> 모드: {'드라이런' if dry_run else '실제 적용'}, 이름변경={'활성' if rename_nodes else '비활성'}")
+            print(f">> 모드: {{'드라이런' if dry_run else '실제 적용'}}, 이름변경={{'활성' if rename_nodes else '비활성'}}")
         
         # 0. 정리 전 스냅샷
         pre_stats = self._generate_tree_stats()
@@ -57,15 +57,18 @@ class TreeCleanupEngine:
         
         # 2. 교차 부모 중복/유사 처리
         await self._resolve_cross_parent_duplicates()
+
+        # 3. 유사 카테고리 병합 (새로 추가된 단계)
+        await self._merge_similar_categories()
         
-        # 3. 리프 병합
+        # 4. 리프 병합
         await self._merge_similar_leaves()
         
-        # 4. 이름 정리 (옵션)
+        # 5. 이름 정리 (옵션)
         if rename_nodes:
             await self._rename_nodes()
         
-        # 5. 정리 후 통계 및 저장
+        # 6. 정리 후 통계 및 저장
         self.memory_manager.save_tree()
         self.cleanup_stats['end_time'] = time.time()
         
@@ -513,13 +516,101 @@ class TreeCleanupEngine:
     async def _merge_similar_leaves(self):
         """유사한 리프 노드들을 병합합니다."""
         if self.debug:
-            print(f"\n--- 3단계: 유사 리프 병합 ---")
+            print(f"\n--- 4단계: 유사 리프 병합 ---")
         
         similar_groups = await self._find_similar_leaf_groups()
         
         for group in similar_groups:
             if len(group) > 1:
                 await self._merge_leaf_group(group)
+
+    async def _merge_similar_categories(self):
+        """의미적으로 유사한 카테고리들을 병합합니다."""
+        if self.debug:
+            print(f"\n--- 3단계: 유사 카테고리 병합 ---")
+
+        similar_category_groups = await self._find_similar_category_groups()
+
+        for group in similar_category_groups:
+            if len(group) > 1:
+                await self._merge_category_group(group)
+
+    async def _find_similar_category_groups(self):
+        """유사한 카테고리 노드 그룹들을 찾습니다."""
+        root_node = self.memory_manager.get_root_node()
+        if not root_node:
+            return []
+
+        # 루트의 직계 자식인 카테고리 노드들만 수집
+        category_nodes = [
+            self.memory_manager.get_node(child_id)
+            for child_id in root_node.children_ids
+            if self.memory_manager.get_node(child_id) and self.memory_manager.get_node(child_id).coordinates.get("start") == -1
+        ]
+
+        if len(category_nodes) <= 1:
+            return []
+
+        if self.debug:
+            print(f">> {len(category_nodes)}개 최상위 카테고리 간 유사도 분석 시작.")
+
+        # 카테고리 노드 간 유사도 매트릭스 생성
+        similarity_matrix = await self._build_similarity_matrix(category_nodes)
+        
+        # 클러스터링 수행
+        clusters = self._connected_components_clustering(category_nodes, similarity_matrix)
+        
+        # 2개 이상인 클러스터만 반환
+        similar_groups = [[node.node_id for node in cluster] for cluster in clusters if len(cluster) > 1]
+        
+        if self.debug and similar_groups:
+            print(f">> {len(similar_groups)}개의 유사 카테고리 그룹 발견.")
+            for i, group in enumerate(similar_groups):
+                topics = [self.memory_manager.get_node(nid).topic for nid in group]
+                print(f"  - 그룹 {i+1}: {topics}")
+
+        return similar_groups
+
+    async def _merge_category_group(self, category_node_ids):
+        """유사 카테고리 그룹을 하나의 대표 카테고리로 병합합니다."""
+        if len(category_node_ids) <= 1:
+            return
+
+        nodes = [self.memory_manager.get_node(nid) for nid in category_node_ids]
+        
+        # 대표 카테고리 선정 (자식 노드가 가장 많은 카테고리)
+        representative_node = max(nodes, key=lambda n: len(n.children_ids))
+        
+        if self.debug:
+            topics = [n.topic for n in nodes]
+            print(f">> 카테고리 병합: {topics} -> 대표 '{representative_node.topic}'")
+
+        # 나머지 카테고리들을 대표 카테고리에 병합
+        for node in nodes:
+            if node.node_id != representative_node.node_id:
+                # 자식 노드들을 대표 카테고리로 이동
+                for child_id in node.children_ids:
+                    self.memory_manager.reparent_node(child_id, representative_node.node_id)
+                    self.cleanup_stats['moves'] += 1
+                
+                # 대화 인덱스 병합
+                if hasattr(node, 'conversation_indices') and hasattr(representative_node, 'conversation_indices'):
+                    representative_node.conversation_indices.extend(node.conversation_indices)
+                
+                # 소스 카테고리 노드 제거
+                self._remove_node(node.node_id)
+                self.cleanup_stats['merges'] += 1
+        
+        # 대표 카테고리 요약 업데이트
+        representative_node.summary = await self._generate_merged_summary(representative_node, *[n for n in nodes if n.node_id != representative_node.node_id])
+        
+        # 중복 대화 인덱스 제거 및 정렬
+        if hasattr(representative_node, 'conversation_indices'):
+            representative_node.conversation_indices = sorted(list(set(representative_node.conversation_indices)))
+
+        self.memory_manager.save_tree()
+        if self.debug:
+            print(f">> 병합 완료. '{representative_node.topic}' 카테고리에 {len(representative_node.children_ids)}개 하위 노드 포함.")
     
     async def _find_similar_leaf_groups(self):
         """유사한 리프 노드 그룹들을 찾습니다."""

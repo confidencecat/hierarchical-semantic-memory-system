@@ -143,102 +143,63 @@ class AIManager:
             return ''
     
     async def call_ai_async_multiple(self, queries, system_prompt, history=None, fine=None):
-        """여러 LOAD API 키를 사용한 병렬 비동기 호출"""
-        if not LOAD_API_KEYS:
-            # LOAD API 키가 없으면 기본 API 사용
-            tasks = []
-            for query in queries:
-                task = self.call_ai_async_single(
-                    query, system_prompt, history, fine, API_KEY['API_1']
-                )
-                tasks.append(task)
+        """여러 LOAD API 키를 사용한 병렬 비동기 호출 (실시간 디버그 출력 지원)"""
+        if not LOAD_API_KEYS or len(queries) <= 1:
+            tasks = [self.call_ai_async_single(q, system_prompt, history, fine, API_KEY['API_1']) for q in queries]
             return await asyncio.gather(*tasks)
-        
-        # LOAD API 키들을 사용한 병렬 처리
+
         self.call_stats['parallel_calls'] += 1
         start_time = time.time()
-        
-        # 각 호출의 정보를 저장할 딕셔너리들
+
         call_infos = [{'query_index': i, 'query_preview': query[:50] + '...' if len(query) > 50 else query} 
-                     for i, query in enumerate(queries)]
+                      for i, query in enumerate(queries)]
         
-        tasks = []
-        for i, query in enumerate(queries):
-            api_key = LOAD_API_KEYS[i % len(LOAD_API_KEYS)]  # 라운드 로빈 방식
-            call_info = call_infos[i]  # 각 호출의 정보를 전달
-            
-            loop = asyncio.get_event_loop()
-            task = loop.run_in_executor(
-                None, 
-                self.call_ai, 
-                query, system_prompt, history, fine, api_key, 3, False, call_info
-            )
-            tasks.append(task)
-        
-        # 병렬 시작 메시지 (디버그 모드일 때만)
         if self.debug:
-            print(f"===========> AI 병렬 호출 시작 ===========>")
-            print(f"호출 수량: {len(queries)}개")
-            print(f"사용 API 키: {len(LOAD_API_KEYS)}개")
+            print(f"===========> AI 병렬 호출 시작 ({len(queries)}개) ===========>")
             for i, call_info in enumerate(call_infos):
                 api_key_type = 'LOAD' if LOAD_API_KEYS[i % len(LOAD_API_KEYS)] in LOAD_API_KEYS else 'MAIN'
-                print(f"  {i+1}. API키: {api_key_type}, 쿼리: {call_info['query_preview']}")
-            print(f"=========================================>")
+                print(f"  [TASK-{i+1:02d}] API: {api_key_type}, QUERY: \"{call_info['query_preview']}\"")
+            print(f"======================================================>")
+
+        async def run_and_debug(i, query):
+            api_key = LOAD_API_KEYS[i % len(LOAD_API_KEYS)]
+            call_info = call_infos[i]
+            
+            try:
+                # asyncio.to_thread를 사용하여 블로킹 함수를 비동기적으로 실행
+                result = await asyncio.to_thread(
+                    self.call_ai, query, system_prompt, history, fine, api_key, 3, False, call_info
+                )
+                
+                if self.debug:
+                    duration = call_info.get('duration', 0)
+                    response_type = "True" if result.lower() == 'true' else ("False" if result.lower() == 'false' else f"{len(result)}자")
+                    print(f"  [DONE] [TASK-{i+1:02d}] 완료 ({duration:.2f}초) - 결과: {response_type}")
+                
+                return result
+            except Exception as e:
+                if self.debug:
+                    print(f"  [FAIL] [TASK-{i+1:02d}] 실패 - 오류: {e}")
+                return "" # 실패 시 빈 문자열 반환
+
+        # 각 쿼리에 대해 run_and_debug 코루틴 생성
+        tasks = [run_and_debug(i, q) for i, q in enumerate(queries)]
         
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        # 모든 작업을 동시에 실행하고 결과 기다리기
+        results = await asyncio.gather(*tasks)
         
-        # 결과 처리 및 통계
-        successful_results = []
-        success_count = 0
-        error_count = 0
-        
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                call_infos[i]['success'] = False
-                call_infos[i]['error'] = str(result)
-                successful_results.append('')  # Empty result for failed queries
-                error_count += 1
-            else:
-                successful_results.append(result)
-                success_count += 1
-        
-        # 병렬 완료 메시지 (디버그 모드일 때만)
+        success_count = sum(1 for r in results if r is not None and r != "")
+
         if self.debug:
             end_time = time.time()
-            print(f"===========> AI 병렬 호출 완료 ===========>")
-            print(f"총 소요시간: {end_time - start_time:.2f}초")
-            print(f"성공률: {success_count}/{len(queries)}개")
-            print(f"평균 소요시간: {(end_time - start_time)/len(queries):.2f}초")
-            
-            # 각 호출의 상세 정보 출력
-            for i, call_info in enumerate(call_infos):
-                if 'duration' in call_info:
-                    response_type = ""
-                    if successful_results[i].lower() == 'true':
-                        response_type = "True"
-                    elif successful_results[i].lower() == 'false':
-                        response_type = "False"
-                    else:
-                        response_type = f"{len(successful_results[i])}자"
-                    
-                    print(f"  {i+1}. API키: {call_info.get('api_key_type', 'UNKNOWN')}, "
-                          f"시간: {call_info['duration']:.2f}초, "
-                          f"결과: {response_type}")
-                else:
-                    print(f"  {i+1}. 실패: {call_info.get('error', '알 수 없는 오류')}")
-            print(f"=========================================>")
-        
-        return successful_results
-        
-        # Filter out exceptions and log them
-        successful_results = []
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                successful_results.append('')  # Empty result for failed queries
-            else:
-                successful_results.append(result)
-        
-        return successful_results
+            total_duration = end_time - start_time
+            print(f"===========> AI 병렬 호출 완료 ({total_duration:.2f}초) ===========>")
+            print(f"  - 성공률: {success_count}/{len(queries)} ({success_count/len(queries)*100:.1f}%)")
+            if len(queries) > 0:
+                print(f"  - 평균 처리 시간 (개별): {total_duration/len(queries):.2f}초/쿼리")
+            print(f"======================================================>")
+
+        return results
     
     def get_stats(self):
         """AI 호출 통계를 반환합니다."""
