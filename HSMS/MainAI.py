@@ -8,7 +8,7 @@ from .AIManager import AIManager
 class MainAI:
     """메인 인공지능 - 사용자와 직접 대화하는 주체"""
     
-    def __init__(self, force_search=False, force_record=False, debug=False, max_depth=4, top_search_n=0, no_record=False):
+    def __init__(self, force_search=False, force_record=False, debug=False, max_depth=4, top_search_n=0, no_record=False, no_search=False):
         self.debug = debug
         self.memory_manager = MemoryManager(debug=self.debug)
         self.auxiliary_ai = AuxiliaryAI(self.memory_manager, debug=self.debug, max_depth=max_depth, top_search_n=top_search_n)
@@ -17,6 +17,7 @@ class MainAI:
         self.force_search = force_search
         self.force_record = force_record
         self.no_record = no_record
+        self.no_search = no_search
         self.max_depth = max_depth
         self.top_search_n = top_search_n
         
@@ -24,6 +25,8 @@ class MainAI:
             raise ValueError("--force-search와 --force-record는 동시에 사용할 수 없습니다.")
         if self.force_record and self.no_record:
             raise ValueError("--force-record와 --no-record는 동시에 사용할 수 없습니다.")
+        if self.force_search and self.no_search:
+            raise ValueError("--force-search와 --no-search는 동시에 사용할 수 없습니다.")
 
     def set_max_depth(self, new_depth):
         """최대 트리 깊이를 동적으로 설정합니다."""
@@ -74,23 +77,28 @@ class MainAI:
             print(f"=============================================================")
         
         # 1. 기억 필요 여부 확인 (AI 기반 판단)
-        if self.force_search:
-            need_memory = True
-            if self.debug:
-                print("+- [MEMORY-SEARCH] 기억 검색 단계 (강제 모드)")
-        else:
-            need_memory = await self._needs_memory_search_async(user_input)
-            if self.debug:
-                print(f"+- [MEMORY-SEARCH] 기억 검색 단계")
-                print(f"|  필요 여부: {'예' if need_memory else '아니오'}")
-        
-        # 2. 기억 검색 (필요한 경우만)
         relevant_data = ""
-        if need_memory:
-            relevant_data = await self.auxiliary_ai.search_relevant_memories(user_input)
-        
+        if not self.no_search:
+            if self.force_search:
+                need_memory = True
+                if self.debug:
+                    print("+- [MEMORY-SEARCH] 기억 검색 단계 (강제 모드)")
+            else:
+                need_memory = await self._needs_memory_search_async(user_input)
+                if self.debug:
+                    print(f"+- [MEMORY-SEARCH] 기억 검색 단계")
+                    print(f"|  필요 여부: {'예' if need_memory else '아니오'}")
+            
+            # 2. 기억 검색 (필요한 경우만)
+            if need_memory:
+                relevant_data = await self.auxiliary_ai.search_relevant_memories(user_input)
+            
+            if self.debug:
+                print(f"+- [MEMORY-SEARCH] 기억 검색 완료")
+        elif self.debug:
+            print("+- [MEMORY-SEARCH] 기억 검색을 건너뛰었습니다 (--no-search).")
+
         if self.debug:
-            print(f"+- [MEMORY-SEARCH] 기억 검색 완료")
             print()
             print("+- [RESPONSE] 응답 생성 단계")
         
