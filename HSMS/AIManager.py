@@ -1,6 +1,7 @@
 import asyncio
 import time
 import google.generativeai as genai
+import sys
 from google.api_core.exceptions import ResourceExhausted
 from config import API_KEY, LOAD_API_KEYS, GEMINI_MODEL
 from .DataManager import DataManager
@@ -100,24 +101,14 @@ class AIManager:
                     print(f"      └─ 완료")
                 
                 return result
-            except ResourceExhausted:
-                attempt += 1
-                if attempt > retries:
-                    if call_info is not None:
-                        call_info.update({
-                            'success': False,
-                            'error': f'재시도 한계 도달: {retries}번'
-                        })
-                    return ''
-                wait = 2 ** attempt
-                time.sleep(wait)
+            except ResourceExhausted as e:
+                err_msg = f"[ERROR] AI API 호출이 너무 많아 오류가 발생했습니다: 429 = RPM초과 : {e}"
+                print(err_msg)
+                return err_msg
             except Exception as e:
-                if call_info is not None:
-                    call_info.update({
-                        'success': False,
-                        'error': str(e)
-                    })
-                return ''
+                err_msg = f"[ERROR] AI API 호출 중 예외 발생: {e}"
+                print(err_msg)
+                return err_msg
     
     async def call_ai_async_single(self, prompt, system, history=None, fine=None, api_key=None, retries=3):
         """단일 AI 비동기 호출"""
@@ -138,9 +129,9 @@ class AIManager:
             return result
         except Exception as e:
             self.call_stats['error_count'] += 1
-            if self.debug:
-                print(f"      └─ [ASYNC-ERROR] 비동기 호출 오류: {e}")
-            return ''
+            err_msg = f"[ERROR] 비동기 AI 호출 중 예외 발생: {e}"
+            print(err_msg)
+            return err_msg
     
     async def call_ai_async_multiple(self, queries, system_prompt, history=None, fine=None):
         """여러 LOAD API 키를 사용한 병렬 비동기 호출 (실시간 디버그 출력 지원)"""
@@ -164,23 +155,17 @@ class AIManager:
         async def run_and_debug(i, query):
             api_key = LOAD_API_KEYS[i % len(LOAD_API_KEYS)]
             call_info = call_infos[i]
-            
             try:
-                # asyncio.to_thread를 사용하여 블로킹 함수를 비동기적으로 실행
-                result = await asyncio.to_thread(
-                    self.call_ai, query, system_prompt, history, fine, api_key, 3, False, call_info
-                )
-                
+                # 완전 비동기 방식으로 호출
+                result = await self.call_ai_async_single(query, system_prompt, history, fine, api_key)
                 if self.debug:
-                    duration = call_info.get('duration', 0)
                     response_type = "True" if result.lower() == 'true' else ("False" if result.lower() == 'false' else f"{len(result)}자")
-                    print(f"  [DONE] [TASK-{i+1:02d}] 완료 ({duration:.2f}초) - 결과: {response_type}")
-                
+                    print(f"  [DONE] [TASK-{i+1:02d}] 완료 - 결과: {response_type}")
                 return result
             except Exception as e:
-                if self.debug:
-                    print(f"  [FAIL] [TASK-{i+1:02d}] 실패 - 오류: {e}")
-                return "" # 실패 시 빈 문자열 반환
+                err_msg = f"[ERROR] 병렬 AI 호출 중 예외 발생 (TASK-{i+1:02d}): {e}"
+                print(err_msg)
+                return err_msg
 
         # 각 쿼리에 대해 run_and_debug 코루틴 생성
         tasks = [run_and_debug(i, q) for i, q in enumerate(queries)]

@@ -3,7 +3,7 @@ import argparse
 import time
 # 새로운 모듈 구조에서 클래스 임포트
 from HSMS import MainAI, MemoryManager, TreeCleanupEngine
-from config import API_KEY, LOAD_API_KEYS, TEST_QUESTIONS, RECORD_TEST_QUESTIONS
+from config import API_KEY, LOAD_API_KEYS, SHORT_TEST_QUESTIONS, TEST_QUESTIONS, RECORD_TEST_QUESTIONS
 
 
 def parse_arguments():
@@ -55,7 +55,7 @@ def parse_arguments():
     parser.add_argument(
         '--fanout-limit',
         type=int,
-        default=12,
+        default=5,
         help='한 노드가 가질 수 있는 최대 자식 수 (트리 정리 시 사용).'
     )
     parser.add_argument(
@@ -214,10 +214,17 @@ def show_tree_structure():
 async def run_test_mode(force_search=False, force_record=False, debug=False, max_depth=4, top_search_n=0):
     """테스트 모드로 실행합니다."""
     print("=== 계층적 의미 기억 시스템 시작 (테스트 모드) ===")
+    import sys
+    args = getattr(sys, '_hsms_args', None)
+    no_search = False
+    if args is not None and hasattr(args, 'no_search'):
+        no_search = args.no_search
     if force_search:
         print("|| 강제 검색 모드: 모든 대화에서 기억 탐색을 수행합니다.")
     elif force_record:
         print("|| 기록 전용 모드: AI 응답 없이 정보만 저장합니다.")
+    elif no_search:
+        print("|| 검색 비활성화 모드: 기억을 검색하지 않고 응답합니다.")
     else:
         print("|| 효율 모드: 필요한 경우에만 기억 탐색을 수행합니다.")
     if debug:
@@ -226,7 +233,7 @@ async def run_test_mode(force_search=False, force_record=False, debug=False, max
     main_ai_instance = MainAI(force_search=force_search, force_record=force_record, debug=debug, max_depth=max_depth, top_search_n=top_search_n)
     
     # 테스트 질문들 - 더 다양한 시나리오 추가
-    test_questions = TEST_QUESTIONS
+    test_questions = SHORT_TEST_QUESTIONS
 
     for i, question in enumerate(test_questions):
         print(f"\n--- 질문 {i+1} ---")
@@ -514,6 +521,8 @@ if __name__ == '__main__':
     no_search = getattr(args, 'no_search', False)
     
     if args.mode == 'test':
+        import sys
+        sys._hsms_args = args  # for run_test_mode banner logic
         asyncio.run(run_test_mode(force_search=force_search, force_record=force_record, debug=args.debug, max_depth=args.max_depth, top_search_n=args.top_search_n))
     elif args.mode == 'chat':
         asyncio.run(run_chat_mode(force_search=force_search, force_record=force_record, debug=args.debug, max_depth=args.max_depth, top_search_n=args.top_search_n, question=args.question, no_record=no_record, no_search=no_search))
