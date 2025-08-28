@@ -38,9 +38,7 @@ class TreeCleanupEngine:
         self.cleanup_stats['start_time'] = time.time()
         
         if self.debug:
-            print(f"\n=== 트리 정리 엔진 시작 ===")
-            print(f">> 설정: max_depth={self.max_depth}, fanout_limit={self.fanout_limit}")
-            print(f">> 모드: {{'드라이런' if dry_run else '실제 적용'}}, 이름변경={{'활성' if rename_nodes else '비활성'}}")
+            print(f"트리 정리 시작")
         
         pre_stats = self._generate_tree_stats()
         if self.debug:
@@ -63,10 +61,7 @@ class TreeCleanupEngine:
         self.cleanup_stats['end_time'] = time.time()
         post_stats = self._generate_tree_stats()
         if self.debug:
-            print(f"\n=== 정리 완료 ===")
-            print(f">> 정리 후: 노드 {post_stats['total_nodes']}개, 평균 fanout {post_stats['avg_fanout']:.1f}, 최대 깊이 {post_stats['max_depth']}")
-            print(f">> 변경사항: 이동 {self.cleanup_stats['moves']}개, 병합 {self.cleanup_stats['merges']}개, 그룹 {self.cleanup_stats['new_groups']}개, 이름변경 {self.cleanup_stats['renames']}개")
-            print(f">> 소요시간: {self.cleanup_stats['end_time'] - self.cleanup_stats['start_time']:.1f}초")
+            print(f"트리 정리 완료 ({self.cleanup_stats['end_time'] - self.cleanup_stats['start_time']:.1f}초)")
         return self.cleanup_stats
     
     async def _dry_run_analysis(self):
@@ -98,12 +93,12 @@ class TreeCleanupEngine:
     async def _cluster_excessive_fanouts(self):
         """자식 수가 fanout_limit를 초과하는 노드들을 군집화합니다."""
         if self.debug:
-            print(f"\n--- 1단계: 자식 과다 군집화 ---")
+            print(f"군집화 단계")
         
         for node_id, child_count in self._find_excessive_fanout_nodes():
             node = self.memory_manager.get_node(node_id)
             if self.debug:
-                print(f">> 처리 중: '{node.topic}' ({child_count}개 자식)")
+                print(f"노드 처리: '{node.topic}'")
             start_time = time.time()
             current_depth = self.memory_manager.get_node_depth(node_id)
             if current_depth + 1 >= self.max_depth:
@@ -276,7 +271,7 @@ class TreeCleanupEngine:
 
     async def _merge_duplicate_nodes(self, node_ids, topic):
         """중복된 노드들을 병합합니다."""
-        if self.debug: print(f">> 중복 병합: '{topic}' ({len(node_ids)}개 노드)")
+        if self.debug: print(f"중복 병합: '{topic}'")
         
         nodes = [self.memory_manager.get_node(nid) for nid in node_ids]
         representative = max(nodes, key=lambda n: len(n.children_ids))
@@ -296,7 +291,7 @@ class TreeCleanupEngine:
         
         target_node.summary = await self._generate_merged_summary(target_node, source_node)
         self._remove_node(source_node.node_id)
-        if self.debug: print(f">>>> 병합 완료: '{source_node.topic}' -> '{target_node.topic}'")
+        if self.debug: print(f"병합 완료: '{source_node.topic}' -> '{target_node.topic}'")
 
     async def _generate_merged_summary(self, target_node, source_node):
         """병합된 노드의 요약을 생성합니다."""

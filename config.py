@@ -9,7 +9,163 @@ if not load_dotenv():
 ALL_MEMORY = 'memory/all_memory.json'
 HIERARCHICAL_MEMORY = 'memory/hierarchical_memory.json'
 
-GEMINI_MODEL = "gemini-2.5-flash-lite"
+GEMINI_MODEL = "gemini-2.5-flash"
+
+# config.json 관리 로직 (GEMINI_MODEL 이후에 위치해야 함)
+import json
+CONFIG_JSON_PATH = 'config.json'
+
+# 기본값 정의
+DEFAULT_CONFIG = {
+    "fanout_limit": 5,
+    "max_depth": 9,
+    "knn_k": 3,
+    "api_model": GEMINI_MODEL,
+    "max_summary_length": 500  # 부모 노드 요약 최대 길이
+}
+
+def load_local_config():
+    try:
+        with open(CONFIG_JSON_PATH, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        # 누락된 값은 기본값으로 채움
+        for k, v in DEFAULT_CONFIG.items():
+            if k not in data:
+                data[k] = v
+        return data
+    except Exception:
+        return DEFAULT_CONFIG.copy()
+
+def save_local_config(new_config):
+    # 누락된 값은 기본값으로 채움
+    for k, v in DEFAULT_CONFIG.items():
+        if k not in new_config:
+            new_config[k] = v
+    with open(CONFIG_JSON_PATH, 'w', encoding='utf-8') as f:
+        json.dump(new_config, f, ensure_ascii=False, indent=2)
+
+# 전역 config 객체 (import 시 자동 로드)
+LOCAL_CONFIG = load_local_config()
+
+def get_config_value(key):
+    value = LOCAL_CONFIG.get(key, DEFAULT_CONFIG.get(key))
+    if key == 'knn_k':
+        min_k = 2
+        max_k = 50
+        if value < min_k:
+            print(f"[경고] knn_k 값이 너무 작음({value}), 최소값 {min_k}로 자동 조정.")
+            return min_k
+        if value > max_k:
+            print(f"[경고] knn_k 값이 너무 큼({value}), 최대값 {max_k}로 자동 조정.")
+            return max_k
+    return value
+
+def set_config_value(key, value):
+    # knn_k validation
+    if key == 'knn_k':
+        min_k = 2
+        max_k = 50
+        if value < min_k:
+            print(f"[경고] knn_k 값이 너무 작음({value}), 최소값 {min_k}로 자동 조정.")
+            value = min_k
+        if value > max_k:
+            print(f"[경고] knn_k 값이 너무 큼({value}), 최대값 {max_k}로 자동 조정.")
+            value = max_k
+    LOCAL_CONFIG[key] = value
+    save_local_config(LOCAL_CONFIG)
+
+import json
+import os
+import sys
+from dotenv import load_dotenv
+
+# .env 파일에서 환경 변수 로드
+if not load_dotenv():
+    print("Warning: .env file not found. Please ensure API keys are set in environment variables.")
+
+# --- 경로 및 기본 설정 ---
+ALL_MEMORY = 'memory/all_memory.json'
+HIERARCHICAL_MEMORY = 'memory/hierarchical_memory.json'
+CONFIG_JSON_PATH = 'config.json'
+
+# --- API 키 로드 ---
+API_KEY = {
+    'API_1': os.getenv('API_1'),
+    'API_2': os.getenv('API_2'),
+}
+DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
+
+if not API_KEY['API_1']:
+    print("ERROR: API_1 not found. This is required.")
+    sys.exit(1)
+
+# --- 로컬 설정 (config.json) 관리 ---
+
+# config.json에 대한 기본값
+DEFAULT_CONFIG = {
+    "fanout_limit": 5,
+    "max_depth": 4,
+    "knn_k": 3,
+    "api_model": "gemini-1.5-flash-latest"
+}
+
+class Config:
+    def __init__(self):
+        self.config_data = self._load_config()
+
+    def _load_config(self):
+        """config.json 파일을 로드하고, 없으면 기본값으로 생성합니다."""
+        try:
+            with open(CONFIG_JSON_PATH, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            # 누락된 키가 있으면 기본값으로 채워줍니다.
+            for key, value in DEFAULT_CONFIG.items():
+                data.setdefault(key, value)
+            return data
+        except (FileNotFoundError, json.JSONDecodeError):
+            self._save_config(DEFAULT_CONFIG)
+            return DEFAULT_CONFIG.copy()
+
+    def _save_config(self, data):
+        """설정 데이터를 config.json 파일에 저장합니다."""
+        with open(CONFIG_JSON_PATH, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+    def get(self, key):
+        """설정 값을 가져옵니다."""
+        return self.config_data.get(key, DEFAULT_CONFIG.get(key))
+
+    def set(self, key, value):
+        """설정 값을 변경하고 파일에 저장합니다."""
+        self.config_data[key] = value
+        self._save_config(self.config_data)
+        print(f"Config updated: {key} = {value}")
+
+    def update_from_args(self, args):
+        """argparse로 받은 인자를 설정에 반영하고 저장합니다."""
+        changed = False
+        args_dict = vars(args)
+        for key in DEFAULT_CONFIG:
+            if key in args_dict and args_dict[key] is not None:
+                if self.get(key) != args_dict[key]:
+                    self.set(key, args_dict[key])
+                    changed = True
+        if changed:
+            print("Configuration saved.")
+
+# 전역 인스턴스 생성
+config = Config()
+
+import os
+import sys
+from dotenv import load_dotenv
+
+# Load environment variables
+if not load_dotenv():
+    print("Warning: .env file not found. Please ensure API keys are set in environment variables.")
+
+ALL_MEMORY = 'memory/all_memory.json'
+HIERARCHICAL_MEMORY = 'memory/hierarchical_memory.json'
 
 def prd(PR):
     print('=' * len(PR))
@@ -364,45 +520,62 @@ GROUP_SIMILARITY_FINE = [
 
 # 카테고리명 생성 fine tuning 데이터
 CATEGORY_NAME_FINE = [
+    # 규칙: 반드시 아래 원칙을 지켜라.
+    # 1. 카테고리명/주제명에 '카테고리:', '주제:' 등 접두사를 절대 붙이지 마라.
+    # 2. 오직 순수한 명사형 이름만 출력하라.
+    # 3. 설명, 접두사, 불필요한 문구 금지.
+    # 4. 2-8글자, 특수문자/기호 금지.
+
+    # 잘못된 예시 (금지!):
+    #   카테고리: 건강
+    #   주제: 건강
+    #   건강/의학
+    #   건강 (카테고리)
+
+    # 올바른 예시:
+    #   건강
+    #   물리학
+    #   요리
+
     # 예제 1: 과학 관련
     ["""사용자 대화: 양자역학의 불확정성 원리가 정말 흥미롭다고 생각해. 그리고 상대성이론도 매력적이야.
 
-이 대화에 적합한 카테고리명을 하나만 생성하라. 2-8글자로 간결하게 작성하고, 특수문자나 기호는 사용하지 마라.""", "물리학"],
+이 대화에 적합한 카테고리명을 하나만 생성하라. 2-8글자로 간결하게 작성하고, 특수문자나 기호, 접두사(카테고리:, 주제:)는 절대 사용하지 마라.""", "물리학"],
 
     # 예제 2: 개인정보
     ["""사용자 대화: 내 이름은 김철수이고, 대학교 2학년에 재학 중이야. 컴퓨터공학을 전공하고 있어.
 
-이 대화에 적합한 카테고리명을 하나만 생성하라. 2-8글자로 간결하게 작성하고, 특수문자나 기호는 사용하지 마라.""", "개인소개"],
+이 대화에 적합한 카테고리명을 하나만 생성하라. 2-8글자로 간결하게 작성하고, 특수문자나 기호, 접두사(카테고리:, 주제:)는 절대 사용하지 마라.""", "개인소개"],
 
     # 예제 3: 음식 관련
     ["""사용자 대화: 김치찌개 끓이는 법을 알고 싶어. 그리고 된장찌개도 배우고 싶다.
 
-이 대화에 적합한 카테고리명을 하나만 생성하라. 2-8글자로 간결하게 작성하고, 특수문자나 기호는 사용하지 마라.""", "요리"],
+이 대화에 적합한 카테고리명을 하나만 생성하라. 2-8글자로 간결하게 작성하고, 특수문자나 기호, 접두사(카테고리:, 주제:)는 절대 사용하지 마라.""", "요리"],
 
     # 예제 4: 취미 활동
     ["""사용자 대화: 최근에 기타를 배우기 시작했어. 피아노도 관심이 있고, 음악 전반에 대해 더 알고 싶어.
 
-이 대화에 적합한 카테고리명을 하나만 생성하라. 2-8글자로 간결하게 작성하고, 특수문자나 기호는 사용하지 마라.""", "음악"],
+이 대화에 적합한 카테고리명을 하나만 생성하라. 2-8글자로 간결하게 작성하고, 특수문자나 기호, 접두사(카테고리:, 주제:)는 절대 사용하지 마라.""", "음악"],
 
     # 예제 5: 학습 관련
     ["""사용자 대화: 영어 문법이 어려워. 특히 관계대명사 부분이 이해가 안 돼.
 
-이 대화에 적합한 카테고리명을 하나만 생성하라. 2-8글자로 간결하게 작성하고, 특수문자나 기호는 사용하지 마라.""", "영어학습"],
+이 대화에 적합한 카테고리명을 하나만 생성하라. 2-8글자로 간결하게 작성하고, 특수문자나 기호, 접두사(카테고리:, 주제:)는 절대 사용하지 마라.""", "영어학습"],
 
     # 예제 6: 동물 관련
     ["""사용자 대화: 우리 강아지가 요즘 밥을 잘 안 먹어. 고양이도 키우고 싶은데 같이 키워도 될까?
 
-이 대화에 적합한 카테고리명을 하나만 생성하라. 2-8글자로 간결하게 작성하고, 특수문자나 기호는 사용하지 마라.""", "반려동물"],
+이 대화에 적합한 카테고리명을 하나만 생성하라. 2-8글자로 간결하게 작성하고, 특수문자나 기호, 접두사(카테고리:, 주제:)는 절대 사용하지 마라.""", "반려동물"],
 
     # 예제 7: 철학적 사고
     ["""사용자 대화: 인간의 존재 의미에 대해 고민이 많아. 칸트의 철학도 흥미롭고.
 
-이 대화에 적합한 카테고리명을 하나만 생성하라. 2-8글자로 간결하게 작성하고, 특수문자나 기호는 사용하지 마라.""", "철학"],
+이 대화에 적합한 카테고리명을 하나만 생성하라. 2-8글자로 간결하게 작성하고, 특수문자나 기호, 접두사(카테고리:, 주제:)는 절대 사용하지 마라.""", "철학"],
 
     # 예제 8: 기술 관련
     ["""사용자 대화: 인공지능 발전이 정말 빠르네. 머신러닝도 공부해보고 싶어.
 
-이 대화에 적합한 카테고리명을 하나만 생성하라. 2-8글자로 간결하게 작성하고, 특수문자나 기호는 사용하지 마라.""", "인공지능"]
+이 대화에 적합한 카테고리명을 하나만 생성하라. 2-8글자로 간결하게 작성하고, 특수문자나 기호, 접두사(카테고리:, 주제:)는 절대 사용하지 마라.""", "인공지능"]
 ]
 
 

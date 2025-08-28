@@ -46,9 +46,7 @@ class MainAI:
     async def chat_async(self, user_input):
         """사용자와 채팅합니다 (비동기 버전)."""
         if self.debug:
-            print(f"\n=============================================================")
-            print(f"| [MAIN] 대화 시작")
-            print(f"| 입력: '{user_input[:50]}{'...' if len(user_input) > 50 else ''}'")
+            print(f"대화 시작: '{user_input[:30]}{'...' if len(user_input) > 30 else ''}'")
         
         # force_record 모드인 경우 AI 응답 없이 기록만 수행
         if self.force_record:
@@ -67,14 +65,13 @@ class MainAI:
             await self.auxiliary_ai.handle_conversation(conversation)
             
             if self.debug:
-                print("+- [RECORD-ONLY] 기록 전용 모드 완료")
+                print("기록 전용 모드 완료")
             
             return ""  # 빈 응답 반환
         
         # 디버그 모드 활성화시 구분선 표시
         if self.debug:
-            print(f"| 모드: {'강제 검색' if self.force_search else '일반 대화'}")
-            print(f"=============================================================")
+            print(f"모드: {'강제 검색' if self.force_search else '일반 대화'}")
         
         # 1. 기억 필요 여부 확인 (AI 기반 판단)
         relevant_data = ""
@@ -82,25 +79,23 @@ class MainAI:
             if self.force_search:
                 need_memory = True
                 if self.debug:
-                    print("+- [MEMORY-SEARCH] 기억 검색 단계 (강제 모드)")
+                    print("기억 검색: 강제 모드")
             else:
                 need_memory = await self._needs_memory_search_async(user_input)
                 if self.debug:
-                    print(f"+- [MEMORY-SEARCH] 기억 검색 단계")
-                    print(f"|  필요 여부: {'예' if need_memory else '아니오'}")
+                    print(f"기억 검색 필요: {'예' if need_memory else '아니오'}")
             
             # 2. 기억 검색 (필요한 경우만)
             if need_memory:
                 relevant_data = await self.auxiliary_ai.search_relevant_memories(user_input)
             
             if self.debug:
-                print(f"+- [MEMORY-SEARCH] 기억 검색 완료")
+                print("기억 검색 완료")
         elif self.debug:
-            print("+- [MEMORY-SEARCH] 기억 검색을 건너뛰었습니다 (--no-search).")
+            print("기억 검색 건너뜀")
 
         if self.debug:
-            print()
-            print("+- [RESPONSE] 응답 생성 단계")
+            print("응답 생성 단계")
         
         # 3. 응답 생성 (기억 데이터 포함)
         if relevant_data:
@@ -131,12 +126,7 @@ class MainAI:
         )
         
         if self.debug:
-            response_preview = response[:100].replace('\n', ' ')
-            print(f"|  응답 완료: {len(response)}자 (미리보기: {response_preview}...)")
-            print(f"+- [RESPONSE] 응답 생성 완료")
-            print()
-            print("=============================================================")
-            print("+- [CONVERSATION-STORAGE] 대화 저장 단계")
+            print(f"응답 완료 ({len(response)}자)")
         
         # 5. 대화를 기억 시스템에 저장 (비동기 처리, no_record=False일 때만)
         if not self.no_record:
@@ -149,11 +139,9 @@ class MainAI:
             await self.auxiliary_ai.handle_conversation(conversation)
             
             if self.debug:
-                print(f"+- [CONVERSATION-STORAGE] 대화 저장 완료")
-                print("=============================================================")
+                print("대화 저장 완료")
         elif self.debug:
-            print(f"+- [CONVERSATION-STORAGE] 대화 저장을 건너뛰었습니다 (--no-record).")
-            print("=============================================================")
+            print("대화 저장 건너뜀")
         
         return response
     
@@ -164,20 +152,28 @@ class MainAI:
     async def _needs_memory_search_async(self, user_input):
         """AI를 사용하여 해당 입력이 과거 기억을 참조해야 하는지 판단합니다."""
         system_prompt = """사용자의 발언이 과거 대화(기억)를 참고해야 하는지 판단하라.
-다음 규칙을 따르라:
-- 사용자가 과거에 했던 말, 이전 대화의 맥락을 직접 묻거나 참조하는 경우에는 "True"를 출력하라.
-- 단순 정보 요청, 일반 지식 질문, 또는 지금 즉시 대답 가능한 질문은 "False"를 출력하라.
-- 출력은 반드시 "True" 또는 "False"로만 하라."""
-        
+
+다음 경우에는 반드시 "True"를 출력하라:
+- 사용자가 "저번에", "이전에", "과거에", "전에" 등의 단어를 사용하여 과거 대화를 언급하는 경우
+- 사용자가 "내가 이야기했던", "내가 말했던", "우리가 나눴던" 등의 표현으로 이전 대화를 참조하는 경우
+- 사용자가 "정리해줘", "요약해줘", "다시 보여줘" 등의 표현으로 과거 정보를 요청하는 경우
+- 사용자가 구체적인 과거 주제나 대화를 언급하는 경우
+
+다음 경우에는 "False"를 출력하라:
+- 일반적인 질문이나 정보 요청
+- 현재 시점의 문제 해결
+- 미래 계획이나 예측에 대한 질문
+
+출력은 반드시 "True" 또는 "False"로만 하라."""
+
         prompt = f"사용자 발언: '{user_input}'"
-        
+
         if self.debug:
-            print(f"│  기억 필요성 판단중...")
-        
+            print("기억 필요성 판단 중...")
+
         result = await self.ai_manager.call_ai_async_single(
             prompt, system_prompt, fine=MEMORY_SEARCH_FINE
         )
-        
         return result.strip().lower() == 'true'
     
     def get_tree_status(self):
