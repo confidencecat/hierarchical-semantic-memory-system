@@ -10,8 +10,9 @@ from .DataManager import DataManager
 class AIManager:
     """AI 호출을 관리하는 클래스 - 비동기 처리 및 성능 모니터링 지원"""
     
-    def __init__(self, debug=False):
+    def __init__(self, debug=False, short_debug=False):
         self.debug = debug
+        self.short_debug = short_debug
         self.call_stats = {
             'total_calls': 0,
             'total_time': 0,
@@ -104,7 +105,7 @@ class AIManager:
             print(err_msg)
             return err_msg
     
-    async def call_ai_async_multiple(self, queries, system_prompt, history=None, fine=None):
+    async def call_ai_async_multiple(self, queries, system_prompt, history=None, fine=None, label=None):
         """여러 LOAD API 키를 사용한 병렬 비동기 호출 (실시간 디버그 출력 지원)"""
         if not LOAD_API_KEYS or len(queries) <= 1:
             tasks = [self.call_ai_async_single(q, system_prompt, history, fine, API_KEY['API_1'], suppress_individual_debug=True) for q in queries]
@@ -117,7 +118,8 @@ class AIManager:
                       for i, query in enumerate(queries)]
         
         if self.debug:
-            print(f"병렬 AI 호출 시작 ({len(queries)}개)")
+            label_str = f" ({label})" if label else ""
+            print(f"병렬 AI 호출 시작 ({len(queries)}개){label_str}")
 
         async def run_and_debug(i, query):
             api_key = LOAD_API_KEYS[i % len(LOAD_API_KEYS)]
@@ -143,7 +145,8 @@ class AIManager:
             end_time = time.time()
             total_duration = end_time - start_time
             success_count = sum(1 for r in results if r is not None and r != "")
-            print(f"병렬 AI 호출 완료 ({total_duration:.2f}초)(성공 {success_count}/{len(queries)})")
+            label_str = f" ({label})" if label else ""
+            print(f"병렬 AI 호출 완료 ({total_duration:.2f}초)(성공 {success_count}/{len(queries)}){label_str}")
 
         return results
         """AI 호출 통계를 반환합니다."""

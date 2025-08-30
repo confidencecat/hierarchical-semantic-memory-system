@@ -104,9 +104,13 @@ class MainAI:
 답변은 간결하고 친근하게 1-2문장으로 작성하라.
 절대로 이모티콘을 사용하지 마라."""
             
-            prompt = f"""{relevant_data}
+            prompt = f"""[과거 기억 데이터]
+{relevant_data}
 
-사용자 질문: {user_input}"""
+[현재 사용자 질문]
+{user_input}
+
+위의 과거 기억 데이터를 참고하여 사용자 질문에 답변하라."""
             
             if self.debug:
                 print(f"|  유형: 기억 기반 응답")
