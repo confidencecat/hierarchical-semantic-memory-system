@@ -293,6 +293,26 @@ class AuxiliaryAI:
             node_id = await self._merge_to_similar_conversation(conversation, conversation_index, category_node_id, user_input)
             return node_id
         
+        # fanout_limit 확인
+        from config import get_config_value
+        fanout_limit = get_config_value('fanout_limit')
+        if len(category_node.children_ids) >= fanout_limit:
+            if self.debug:
+                print(f"fanout 초과 ({len(category_node.children_ids)} >= {fanout_limit}): '{category_name}' 카테고리 정리 트리거")
+            # 트리 정리 실행
+            from .TreeCleanupEngine import TreeCleanupEngine
+            cleanup_engine = TreeCleanupEngine(self.memory_manager, debug=self.debug)
+            await cleanup_engine.run_cleanup()
+            
+            # 정리 후 다시 확인
+            category_node = self.memory_manager.get_node(category_node_id)  # 업데이트된 노드 가져오기
+            if len(category_node.children_ids) >= fanout_limit:
+                if self.debug:
+                    print(f"정리 후에도 fanout 초과: 기존 노드에 병합")
+                # 가장 유사한 기존 대화 노드에 병합
+                node_id = await self._merge_to_similar_conversation(conversation, conversation_index, category_node_id, user_input)
+                return node_id
+        
         # 새로운 대화 노드 생성 (A2, A3, ...)
         conversation_topic = await self._generate_conversation_topic(user_input)
         conversation_summary = await self._generate_conversation_summary(conversation)
@@ -963,7 +983,6 @@ AI 응답: {ai_response}
         
         # AI 기반 주제 추출
         topic_system_prompt = """대화에서 핵심 주제를 추출하라.
-사용자의 입력과 AI의 응답을 분석하여 간결하고 명확한 주제명을 생성하라.
 주제명은 2-10글자 정도로 간단하고 구체적이어야 한다.
 
 예시:
@@ -973,26 +992,24 @@ AI 응답: {ai_response}
 - 학교 이야기 → "학교"
 
 대화의 실제 내용과 맥락을 정확히 반영하는 주제명을 만들라."""
-        
-        topic_prompt = f"사용자: {user_content}\nAI: {ai_content}\n\n위 대화의 핵심 주제를 간결하게 추출하라."
-        
+
+        topic_prompt = f"{user_content}\n{ai_content}\n\n위 대화의 핵심 주제를 간결하게 추출하라."
+
         # 요약 생성 - AI 응답 유무에 따라 다른 처리
         if ai_content.strip():  # AI 응답이 있는 경우
-            summary_system_prompt = """대화 내용을 상세하고 포괄적으로 요약하라.
+            summary_system_prompt = """대화 내용을 간결하게 요약하라.
 다음 원칙에 따라 요약하라:
-- 사용자가 말한 내용과 AI가 응답한 내용을 모두 포함하여, 대화의 전체적인 맥락이 드러나게 작성하라.
-- 핵심 주제, 중요한 정보, 구체적인 세부사항을 빠짐없이 포함하라.
-- 요약의 길이는 내용에 따라 자연스럽게 조절하며, 너무 짧게 줄이지 마라.
-- 나중에 이 요약만 보고도 대화의 내용을 충분히 파악할 수 있도록 상세하게 작성하라."""
-            summary_prompt = f"사용자: {user_content}\nAI: {ai_content}\n\n위 대화를 상세히 요약하라."
+- 핵심 내용만 포함하여 간단하게 작성하라.
+- 불필요한 세부사항은 생략하라.
+- 1-2문장으로 요약하라."""
+            summary_prompt = f"{user_content}\n{ai_content}\n\n위 대화를 간단히 요약하라."
         else:  # AI 응답이 없는 경우 (record 모드)
-            summary_system_prompt = """사용자가 제공한 정보를 상세하고 포괄적으로 요약하라.
+            summary_system_prompt = """사용자가 제공한 정보를 간결하게 요약하라.
 다음 원칙에 따라 요약하라:
-- 사용자가 말한 내용의 핵심 정보를 모두 포함하라.
-- 중요한 정보, 구체적인 세부사항을 빠짐없이 포함하라.
-- 정보의 맥락과 의미를 상세히 설명하라.
-- 나중에 이 요약만 보고도 사용자가 어떤 정보를 제공했는지 충분히 파악할 수 있도록 작성하라."""
-            summary_prompt = f"사용자: {user_content}\n\n위 사용자 발언의 내용을 상세히 요약하라."
+- 핵심 정보만 포함하여 간단하게 작성하라.
+- 불필요한 세부사항은 생략하라.
+- 1-2문장으로 요약하라."""
+            summary_prompt = f"{user_content}\n\n위 내용을 간단히 요약하라."
         
         try:
             # 병렬로 주제와 요약 생성
