@@ -509,3 +509,80 @@ class TreeCleanupEngine:
             'avg_fanout': sum(fanouts) / total_nodes,
             'max_depth': max_depth
         }
+
+    async def _build_similarity_matrix(self, nodes):
+        """노드들 간의 유사도 매트릭스를 구축합니다."""
+        n = len(nodes)
+        similarity_matrix = [[0.0 for _ in range(n)] for _ in range(n)]
+        
+        # 대각선은 1.0 (자기 자신과의 유사도)
+        for i in range(n):
+            similarity_matrix[i][i] = 1.0
+        
+        # 상삼각 행렬만 계산하고 대칭으로 복사
+        queries = []
+        pairs = []
+        
+        for i in range(n):
+            for j in range(i + 1, n):
+                node1, node2 = nodes[i], nodes[j]
+                prompt = f"""노드1: "{node1.topic}"
+노드1 설명: {node1.summary}
+
+노드2: "{node2.topic}"  
+노드2 설명: {node2.summary}
+
+위 두 노드가 같은 상위 그룹으로 묶일 만큼 유사한가요?"""
+                queries.append(prompt)
+                pairs.append((i, j))
+        
+        if queries:
+            system_prompt = """두 노드의 유사성을 판단하라.
+같은 상위 카테고리로 묶이기에 충분히 유사하면 "True", 그렇지 않으면 "False"로 답하라."""
+            
+            results = await self.ai_manager.call_ai_async_multiple(
+                queries, system_prompt, fine=NODE_SIMILARITY_FINE
+            )
+            
+            for k, (i, j) in enumerate(pairs):
+                is_similar = results[k].strip().lower() == 'true'
+                similarity = 0.8 if is_similar else 0.2  # 임계값 설정
+                similarity_matrix[i][j] = similarity
+                similarity_matrix[j][i] = similarity  # 대칭 복사
+        
+        return similarity_matrix
+
+    def _connected_components_clustering(self, nodes, similarity_matrix):
+        """연결 성분 기반 클러스터링을 수행합니다."""
+        n = len(nodes)
+        if n <= 1:
+            return [nodes] if nodes else []
+        
+        # 인접 리스트 구성 (유사도 임계값 0.7 이상)
+        threshold = 0.7
+        adjacency = [[] for _ in range(n)]
+        
+        for i in range(n):
+            for j in range(i + 1, n):
+                if similarity_matrix[i][j] >= threshold:
+                    adjacency[i].append(j)
+                    adjacency[j].append(i)
+        
+        # DFS로 연결 성분 찾기
+        visited = [False] * n
+        clusters = []
+        
+        def dfs(start, current_cluster):
+            visited[start] = True
+            current_cluster.append(nodes[start])
+            for neighbor in adjacency[start]:
+                if not visited[neighbor]:
+                    dfs(neighbor, current_cluster)
+        
+        for i in range(n):
+            if not visited[i]:
+                cluster = []
+                dfs(i, cluster)
+                clusters.append(cluster)
+        
+        return clusters
