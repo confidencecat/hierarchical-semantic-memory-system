@@ -201,12 +201,83 @@ class TreeCleanupEngine:
         if self.debug: print(f"중복 병합: '{topic}'")
 
         nodes = [self.memory_manager.get_node(nid) for nid in node_ids]
-        representative = max(nodes, key=lambda n: len(n.children_ids))
+        
+        # 카테고리 노드와 대화 노드 분리
+        category_nodes = [n for n in nodes if n.coordinates["start"] == -1]
+        talk_nodes = [n for n in nodes if n.coordinates["start"] != -1]
+        
+        # 카테고리 노드들끼리만 병합
+        if len(category_nodes) > 1:
+            representative = max(category_nodes, key=lambda n: len(n.children_ids))
+            for node in category_nodes:
+                if node.node_id != representative.node_id:
+                    await self._merge_category_to_representative(node, representative)
+                    self.cleanup_stats['merges'] += 1
+        
+        # 대화 노드들끼리만 병합
+        if len(talk_nodes) > 1:
+            representative = max(talk_nodes, key=lambda n: len(getattr(n, 'conversation_indices', [])))
+            for node in talk_nodes:
+                if node.node_id != representative.node_id:
+                    await self._merge_talk_to_representative(node, representative)
+                    self.cleanup_stats['merges'] += 1
 
-        for node in nodes:
-            if node.node_id != representative.node_id:
-                await self._merge_node_to_representative(node, representative)
-                self.cleanup_stats['merges'] += 1
+    async def _merge_category_to_representative(self, source_node, target_node):
+        """카테고리 노드를 대표 카테고리 노드에 병합합니다."""
+        # 카테고리 노드는 대화 인덱스를 가지면 안 됨
+        if hasattr(source_node, 'conversation_indices') and source_node.conversation_indices:
+            if self.debug:
+                print(f"⚠️  경고: 카테고리 노드 '{source_node.topic}'가 대화를 가지고 있음 - 대화 제거")
+            source_node.conversation_indices = []
+        
+        # 참조 정보 병합
+        if hasattr(source_node, 'references') and hasattr(target_node, 'references'):
+            for ref_id in source_node.references:
+                if ref_id not in target_node.references:
+                    target_node.references.append(ref_id)
+
+        # 자식 노드 재부모 설정
+        for child_id in source_node.children_ids:
+            self.memory_manager.reparent_node(child_id, target_node.node_id)
+
+        # 요약 업데이트 (AI를 통한 자연스러운 통합)
+        target_node.summary = await self._generate_merged_summary(target_node, source_node)
+
+        # 소스 노드 제거
+        self._remove_node(source_node.node_id)
+
+        if self.debug:
+            print(f"카테고리 병합 완료: '{source_node.topic}' -> '{target_node.topic}'")
+            print(f"  - 최종 자식 수: {len(target_node.children_ids)}")
+
+    async def _merge_talk_to_representative(self, source_node, target_node):
+        """대화 노드를 대표 대화 노드에 병합합니다."""
+        # 대화 인덱스 안전하게 병합 (중복 제거)
+        if hasattr(source_node, 'conversation_indices') and hasattr(target_node, 'conversation_indices'):
+            original_count = len(target_node.conversation_indices)
+            for conv_idx in source_node.conversation_indices:
+                if conv_idx not in target_node.conversation_indices:
+                    target_node.conversation_indices.append(conv_idx)
+            target_node.conversation_indices.sort()
+            added_count = len(target_node.conversation_indices) - original_count
+            if self.debug and added_count > 0:
+                print(f"대화 인덱스 병합: {added_count}개 추가, 총 {len(target_node.conversation_indices)}개")
+
+        # 참조 정보 병합
+        if hasattr(source_node, 'references') and hasattr(target_node, 'references'):
+            for ref_id in source_node.references:
+                if ref_id not in target_node.references:
+                    target_node.references.append(ref_id)
+
+        # 요약 업데이트 (AI를 통한 자연스러운 통합)
+        target_node.summary = await self._generate_merged_summary(target_node, source_node)
+
+        # 소스 노드 제거
+        self._remove_node(source_node.node_id)
+
+        if self.debug:
+            print(f"대화 병합 완료: '{source_node.topic}' -> '{target_node.topic}'")
+            print(f"  - 최종 대화 수: {len(target_node.conversation_indices)}")
 
     async def _merge_node_to_representative(self, source_node, target_node):
         """소스 노드를 타겟 노드에 병합합니다."""

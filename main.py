@@ -3,7 +3,7 @@ import argparse
 import time
 # 새로운 모듈 구조에서 클래스 임포트
 from HSMS import MainAI, MemoryManager, TreeCleanupEngine
-from config import API_KEY, LOAD_API_KEYS, SHORT_TEST_QUESTIONS, TEST_QUESTIONS, RECORD_TEST_QUESTIONS, config
+from config import API_KEY, LOAD_API_KEYS, SHORT_TEST_QUESTIONS, config
 
 
 def parse_arguments():
