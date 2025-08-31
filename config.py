@@ -19,7 +19,7 @@ CONFIG_JSON_PATH = 'config.json'
 DEFAULT_CONFIG = {
     "fanout_limit": 5,
     "max_depth": 9,
-    "knn_k": 3,
+    "k_distance": 3,
     "api_model": GEMINI_MODEL,
     "max_summary_length": 500  # 부모 노드 요약 최대 길이
 }
@@ -49,7 +49,7 @@ LOCAL_CONFIG = load_local_config()
 
 def get_config_value(key):
     value = LOCAL_CONFIG.get(key, DEFAULT_CONFIG.get(key))
-    if key == 'k_distance':  # knn_k를 k_distance로 변경
+    if key == 'k_distance':
         min_k = 2
         max_k = 50
         if value < min_k:
@@ -105,7 +105,7 @@ if not API_KEY['API_1']:
 DEFAULT_CONFIG = {
     "fanout_limit": 5,
     "max_depth": 4,
-    "knn_k": 3,
+    "k_distance": 3,
     "api_model": "gemini-1.5-flash-latest"
 }
 

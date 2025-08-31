@@ -135,10 +135,21 @@ def show_tree_structure():
     print(f"총 노드 수: {len(memory_manager.memory_tree)}")
     print()
     
-    def build_tree_visualization(node_id, depth=0, is_last=True, prefix=""):
+    def build_tree_visualization(node_id, depth=0, is_last=True, prefix="", visited=None):
+        if visited is None:
+            visited = set()
+        
         if node_id not in memory_manager.memory_tree:
             return ""
         
+        # 이미 방문한 노드인 경우 중복 표시 방지
+        if node_id in visited:
+            node = memory_manager.memory_tree[node_id]
+            connector = "└── " if is_last else "├── "
+            result = f"{prefix}{connector}[DUPLICATE] {node.topic} (이미 표시됨)\n"
+            return result
+        
+        visited.add(node_id)
         node = memory_manager.memory_tree[node_id]
         
         # 트리 구조 문자
@@ -188,7 +199,7 @@ def show_tree_structure():
             if child_id in memory_manager.memory_tree:
                 new_prefix = prefix + ("    " if is_last else "│   ")
                 is_last_child = (i == len(children_ids) - 1)
-                result += build_tree_visualization(child_id, depth + 1, is_last_child, new_prefix)
+                result += build_tree_visualization(child_id, depth + 1, is_last_child, new_prefix, visited)
         
         return result
     
@@ -481,8 +492,17 @@ def main_ai(prompt='False', max_depth=4, top_search_n=0):
 if __name__ == '__main__':
     args = parse_arguments()
     
-    # 설정 업데이트
-    config.update_from_args(args)
+    # tree나 api_info만 단독으로 요청한 경우 설정 업데이트 생략
+    other_args_used = any([
+        getattr(args, 'k', None) is not None and getattr(args, 'k', None) != 3,
+        getattr(args, 'model', None) is not None and getattr(args, 'model', None) != 'gemini-2.5-flash',
+        getattr(args, 'max_depth', None) is not None and getattr(args, 'max_depth', None) != 4,
+        getattr(args, 'fanout_limit', None) is not None and getattr(args, 'fanout_limit', None) != 5,
+        args.clean_tree, args.rename, args.dry_run
+    ])
+    
+    if not ((args.tree or args.api_info) and not other_args_used):
+        config.update_from_args(args)
     
     # --force-record와 --no-record 동시 사용 방지
     if args.force_record and args.no_record:
@@ -550,5 +570,6 @@ if __name__ == '__main__':
 if __name__ == '__main__':
     args = parse_arguments()
     
-    # 설정 업데이트
-    config.update_from_args(args)
+    # tree나 api_info만 요청한 경우 설정 업데이트 생략
+    if not (args.tree or args.api_info):
+        config.update_from_args(args)

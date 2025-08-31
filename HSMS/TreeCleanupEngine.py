@@ -21,6 +21,7 @@ class TreeCleanupEngine:
             'merges': 0,
             'new_groups': 0,
             'renames': 0,
+            'removed_nodes': 0,
             'start_time': 0,
             'end_time': 0
         }
@@ -98,7 +99,7 @@ class TreeCleanupEngine:
         all_nodes = list(self.memory_manager.memory_tree.values())
         
         for node in all_nodes:
-            if len(node.children_ids) > self.fanout_limit:
+            if node.topic != "ROOT" and len(node.children_ids) > self.fanout_limit:
                 if self.debug:
                     print(f"노드 '{node.topic}'의 자식 수 {len(node.children_ids)}개 > fanout_limit {self.fanout_limit}")
                 
@@ -269,7 +270,8 @@ class TreeCleanupEngine:
 
     def _find_excessive_fanout_nodes(self):
         """fanout_limit를 초과하는 노드들을 찾습니다."""
-        return [(nid, len(n.children_ids)) for nid, n in self.memory_manager.memory_tree.items() if len(n.children_ids) > self.fanout_limit]
+        return [(nid, len(n.children_ids)) for nid, n in self.memory_manager.memory_tree.items() 
+                if len(n.children_ids) > self.fanout_limit and n.topic != "ROOT"]
 
     async def _resolve_cross_parent_duplicates(self):
         """교차 부모간 중복/유사 노드를 해결합니다."""
@@ -301,36 +303,106 @@ class TreeCleanupEngine:
 
     async def _merge_node_to_representative(self, source_node, target_node):
         """소스 노드를 타겟 노드에 병합합니다."""
+        # 1. 대화 인덱스 안전하게 병합 (중복 제거)
         if hasattr(source_node, 'conversation_indices') and hasattr(target_node, 'conversation_indices'):
-            target_node.conversation_indices.extend(source_node.conversation_indices)
+            original_count = len(target_node.conversation_indices)
+            for conv_idx in source_node.conversation_indices:
+                if conv_idx not in target_node.conversation_indices:
+                    target_node.conversation_indices.append(conv_idx)
+            target_node.conversation_indices.sort()
+            added_count = len(target_node.conversation_indices) - original_count
+            if self.debug and added_count > 0:
+                print(f"대화 인덱스 병합: {added_count}개 추가, 총 {len(target_node.conversation_indices)}개")
         
+        # 2. 참조 정보 병합
+        if hasattr(source_node, 'references') and hasattr(target_node, 'references'):
+            for ref_id in source_node.references:
+                if ref_id not in target_node.references:
+                    target_node.references.append(ref_id)
+        
+        # 3. 자식 노드 재부모 설정
         for child_id in source_node.children_ids:
             self.memory_manager.reparent_node(child_id, target_node.node_id)
         
+        # 4. 요약 업데이트 (AI를 통한 자연스러운 통합)
         target_node.summary = await self._generate_merged_summary(target_node, source_node)
+        
+        # 5. 소스 노드 제거
         self._remove_node(source_node.node_id)
-        if self.debug: print(f"병합 완료: '{source_node.topic}' -> '{target_node.topic}'")
+        
+        if self.debug: 
+            print(f"병합 완료: '{source_node.topic}' -> '{target_node.topic}'")
+            print(f"  - 최종 대화 수: {len(target_node.conversation_indices)}")
+            print(f"  - 참조 수: {len(target_node.references) if hasattr(target_node, 'references') else 0}")
 
     async def _generate_merged_summary(self, target_node, source_node):
         """병합된 노드의 요약을 생성합니다."""
-        system_prompt = "두 노드가 병합되었다. 통합된 요약을 1-2문장으로 간결하게 작성하라."
-        merge_text = f"타겟: {target_node.topic} (요약: {target_node.summary})\n소스: {source_node.topic} (요약: {source_node.summary})"
+        # 요약 변경 최소화를 위한 개선된 로직
+        if not target_node.summary and not source_node.summary:
+            return f"{target_node.topic}에 대한 내용"
+        
+        if not target_node.summary:
+            return source_node.summary
+        
+        if not source_node.summary:
+            return target_node.summary
+        
+        # 두 요약이 동일하면 변경하지 않음
+        if target_node.summary == source_node.summary:
+            return target_node.summary
+        
+        # AI를 통한 자연스러운 요약 통합
+        system_prompt = """두 노드의 요약을 자연스럽게 통합하라.
+중요한 지시사항:
+- 원래 요약의 핵심 내용을 최대한 보존하라
+- 새로운 내용을 추가하되 원래 의미를 왜곡하지 마라
+- 중복되는 내용은 정리하고 간결하게 작성하라
+- 1-2문장으로 요약하라"""
+        
+        merge_text = f"""기존 요약: {target_node.summary}
+추가 요약: {source_node.summary}
+주제: {target_node.topic}"""
+        
         try:
-            return await self.ai_manager.call_ai_async_single(merge_text, system_prompt)
+            merged = await self.ai_manager.call_ai_async_single(merge_text, system_prompt)
+            if self.debug:
+                print(f"요약 통합 완료: {len(merged)}자")
+            return merged
         except Exception as e:
-            if self.debug: print(f">>>> [ERROR] 병합 요약 생성 오류: {e}")
-            return f"{target_node.summary} {source_node.summary}"
+            if self.debug: 
+                print(f">>>> [ERROR] 병합 요약 생성 오류: {e}")
+            # 폴백: 간단한 결합
+            return f"{target_node.summary}; {source_node.summary}"
 
     def _remove_node(self, node_id):
         """노드를 트리에서 제거합니다."""
         node = self.memory_manager.get_node(node_id)
-        if not node: return
+        if not node: 
+            return
         
-        if node.parent_id and (parent := self.memory_manager.get_node(node.parent_id)) and node_id in parent.children_ids:
-            parent.children_ids.remove(node_id)
+        # 대화 삭제 방지: 노드에 대화가 남아있는지 확인
+        if hasattr(node, 'conversation_indices') and node.conversation_indices:
+            if self.debug:
+                print(f"⚠️  경고: 삭제하려는 노드 '{node.topic}'에 {len(node.conversation_indices)}개 대화가 남아있음")
+                print(f"   대화 인덱스: {node.conversation_indices}")
+                print(f"   이 노드는 병합되지 않은 상태로 삭제될 수 없음")
+            return  # 대화가 있는 노드는 삭제하지 않음
         
+        # 부모에서 제거
+        if node.parent_id and (parent := self.memory_manager.get_node(node.parent_id)):
+            if node_id in parent.children_ids:
+                parent.children_ids.remove(node_id)
+                if self.debug:
+                    print(f"부모 '{parent.topic}'에서 노드 제거 완료")
+        
+        # 트리에서 완전히 제거
         if node_id in self.memory_manager.memory_tree:
             del self.memory_manager.memory_tree[node_id]
+            if self.debug:
+                print(f"노드 '{node.topic}' 트리에서 완전히 제거됨")
+        
+        # 통계 업데이트
+        self.cleanup_stats['removed_nodes'] += 1
 
     async def _merge_similar_leaves(self):
         """유사한 리프 노드들을 병합합니다."""
@@ -396,16 +468,62 @@ class TreeCleanupEngine:
     async def _merge_leaf_group(self, leaf_node_ids):
         """유사한 리프 노드 그룹을 병합합니다."""
         nodes = [self.memory_manager.get_node(nid) for nid in leaf_node_ids]
+        nodes = [n for n in nodes if n]  # None 제거
+        
+        if len(nodes) < 2:
+            return
+        
         representative = nodes[0]
         
+        # conversation_indices를 안전하게 병합 (중복 제거)
+        if not hasattr(representative, 'conversation_indices'):
+            representative.conversation_indices = []
+        
+        original_count = len(representative.conversation_indices)
+        
         for node in nodes[1:]:
-            if hasattr(representative, 'conversation_indices') and hasattr(node, 'conversation_indices'):
-                representative.conversation_indices.extend(node.conversation_indices)
-            self._remove_node(node.node_id)
+            if hasattr(node, 'conversation_indices'):
+                for conv_idx in node.conversation_indices:
+                    if conv_idx not in representative.conversation_indices:
+                        representative.conversation_indices.append(conv_idx)
+            
+            # 참조 정보도 병합
+            if hasattr(node, 'references') and hasattr(representative, 'references'):
+                for ref_id in node.references:
+                    if ref_id not in representative.references:
+                        representative.references.append(ref_id)
+            
+            # 깊이 제한 초과 시 참조 추가로 해결
+            current_depth = self.memory_manager.get_node_depth(representative.node_id)
+            if current_depth >= self.max_depth:
+                if self.debug:
+                    print(f"깊이 제한 초과: 노드 '{node.topic}'을 참조로 추가")
+                # 깊이 초과 시 병합 대신 참조 추가
+                if node.node_id not in representative.references:
+                    representative.references.append(node.node_id)
+                continue
+            
+            # 노드 삭제 전에 부모 관계 정리
+            if node.parent_id and (parent := self.memory_manager.get_node(node.parent_id)):
+                if node.node_id in parent.children_ids:
+                    parent.children_ids.remove(node.node_id)
+            
+            # 트리에서 노드 삭제
+            if node.node_id in self.memory_manager.memory_tree:
+                del self.memory_manager.memory_tree[node.node_id]
+            
             self.cleanup_stats['merges'] += 1
         
+        representative.conversation_indices.sort()
+        added_conversations = len(representative.conversation_indices) - original_count
+        
+        # 요약 업데이트
         representative.summary = await self._generate_leaf_merge_summary(representative)
-        if self.debug: print(f">>>> 리프 병합: {[n.topic for n in nodes]} -> '{representative.topic}'")
+        
+        if self.debug: 
+            print(f">>>> 리프 병합: {[n.topic for n in nodes]} -> '{representative.topic}'")
+            print(f">>>>   - 추가된 대화: {added_conversations}개, 총 {len(representative.conversation_indices)}개")
+            print(f">>>>   - 참조 수: {len(representative.references) if hasattr(representative, 'references') else 0}개")
 
     async def _generate_leaf_merge_summary(self, merged_node):
         """병합된 리프 노드의 요약을 생성합니다."""

@@ -59,14 +59,26 @@ class AuxiliaryAI:
         
         if len(combined_child_summaries) > max_length:
             # 길이가 초과되면 AI로 요약
+            print(f"📝 [요약 시작] 자식 노드 요약이 {len(combined_child_summaries)}자 > {max_length}자 제한을 초과하여 AI 요약을 시작합니다...")
+            
             summary_prompt = f"""
-            다음 자식 노드 요약들을 {max_length}자 이내로 요약하라:
+            다음 자식 노드 요약들을 {max_length}자 이내로 요약하라.
+            
+            중요한 지시사항:
+            - 사용자가 한 말, 키워드, 구체적인 용어, 고유명사, 숫자, 날짜 등을 중요도를 따지지 않고 모두 유지하라
+            - 원래 내용의 핵심 의미와 세부사항을 최대한 보존하라
+            - 요약하되 정보 손실을 최소화하라
+            - 사용자의 질문, AI의 답변, 구체적인 사실 관계를 모두 포함하라
+            - 전문 용어와 기술적 세부사항을 우선적으로 유지하라
+            
+            요약할 내용:
             {combined_child_summaries}
             """
             try:
                 new_summary = await self.ai_manager.call_ai_async_single(summary_prompt, "요약 생성")
                 if len(new_summary) > max_length:
                     new_summary = new_summary[:max_length].rstrip() + "..."
+                print(f"✅ [요약 완료] 자식 노드 요약이 {len(new_summary)}자로 요약되었습니다.")
             except Exception as e:
                 if self.debug:
                     print(f"[ERROR] 요약 생성 실패: {e}")
@@ -564,7 +576,7 @@ class AuxiliaryAI:
             await self._process_multi_category_conversation(conversation, conversation_index, relevant_categories)
     
     async def _process_single_category(self, conversation, conversation_index, category_name):
-        """단일 카테고리에 대한 대화를 처리합니다."""
+        """단일 카테고리에 대한 대화를 처리하고 노드 ID를 반환합니다."""
         if self.debug:
             print(f"'{category_name}' 카테고리 처리 시작")
         
@@ -578,12 +590,13 @@ class AuxiliaryAI:
         if not category_node:
             if self.debug:
                 print(f"|| 오류: '{category_name}' 카테고리 노드를 찾을 수 없음")
-            return
+            return None
         
         if self.debug:
             print(f">> 완료: '{category_name}' 카테고리 노드 발견 (ID: {category_node.node_id})")
         
         user_input = conversation[0]['content']
+        processed_node_id = None  # 처리된 노드 ID를 저장
         
         if self.debug:
             print(f">> 검색중: 새로운 주제인지 AI로 판단 중...")
@@ -598,8 +611,9 @@ class AuxiliaryAI:
             new_node.add_conversation(conversation_index)
             # 부모 카테고리에는 대화 인덱스를 추가하지 않음 (카테고리는 대화를 가지지 않음)
             await self._safe_save_tree()
+            processed_node_id = new_node.node_id
             if self.debug:
-                print(f"새 노드 생성: '{new_node.topic}'")
+                print(f"새 노드 생성: '{new_node.topic}' (ID: {processed_node_id})")
         else:
             # 기존 노드에 추가
             if self.debug:
@@ -609,6 +623,7 @@ class AuxiliaryAI:
                 if self.debug:
                     print(f"대상 노드: '{relevant_child.topic}'")
                 await self.update_node_and_parents(relevant_child, conversation, conversation_index)
+                processed_node_id = relevant_child.node_id
                 if self.debug:
                     print("노드 업데이트 완료")
             else:
@@ -620,15 +635,18 @@ class AuxiliaryAI:
                 new_node.add_conversation(conversation_index)
                 # 부모 카테고리에는 대화 인덱스를 추가하지 않음 (카테고리는 대화를 가지지 않음)
                 await self._safe_save_tree()
+                processed_node_id = new_node.node_id
                 if self.debug:
                     print(f"|| 새 노드 생성 완료:")
-                    print(f">> [DEBUG]   노드 ID: {new_node.node_id}")
+                    print(f">> [DEBUG]   노드 ID: {processed_node_id}")
                     print(f">> [DEBUG]   주제: '{new_node.topic}'")
                     print(f">> [DEBUG]   부모: '{category_name}' 카테고리")
                     print(f">> [DEBUG]   대화 인덱스: {new_node.conversation_indices}")
         
         if self.debug:
             print(f">> [DEBUG] === '{category_name}' 카테고리 처리 완료 ===\n")
+        
+        return processed_node_id  # 처리된 노드 ID 반환
     
     async def _process_multi_category_conversation(self, conversation, conversation_index, relevant_categories):
         """다중 카테고리에 걸친 대화를 분리하여 처리합니다."""
@@ -2394,8 +2412,7 @@ AI: {new_ai_content}"""
         max_length = get_config_value('max_summary_length')
 
         if len(combined) > max_length:
-            if self.debug:
-                print(f"부모 요약이 너무 길어 AI 요약 적용 (길이: {len(combined)} > {max_length})")
+            print(f"📝 [요약 시작] 부모 노드 요약이 {len(combined)}자 > {max_length}자 제한을 초과하여 AI 요약을 시작합니다...")
 
             # AI를 사용하여 긴 요약을 압축
             ai_summary_prompt = f"""
@@ -2404,12 +2421,20 @@ AI: {new_ai_content}"""
             {combined}
 
             이 내용을 바탕으로 '{parent_topic}'의 전체 내용을 잘 대표하는 간결한 요약을 {max_length}자 이내로 작성해주세요.
-            중요한 세부사항을 유지하면서도 불필요한 부분을 제거하여 핵심 내용만 포함해주세요.
+            
+            중요한 지시사항:
+            - 사용자가 한 말, 키워드, 구체적인 용어, 고유명사, 숫자, 날짜 등을 중요도를 따지지 않고 모두 유지하라
+            - 원래 내용의 핵심 의미와 세부사항을 최대한 보존하라
+            - 요약하되 정보 손실을 최소화하라
+            - 사용자의 질문, AI의 답변, 구체적인 사실 관계를 모두 포함하라
+            - 전문 용어와 기술적 세부사항을 우선적으로 유지하라
+            - 중요한 세부사항을 유지하면서도 불필요한 부분을 제거하여 핵심 내용만 포함하라
             """
 
             try:
                 ai_summarized = await self.ai_manager.call_ai_async_single(ai_summary_prompt, "부모 노드 요약 생성")
                 combined = ai_summarized.strip()
+                print(f"✅ [요약 완료] 부모 노드 요약이 {len(combined)}자로 요약되었습니다.")
 
                 if self.debug:
                     print(f"AI 요약 완료 (길이: {len(combined)})")
@@ -2436,3 +2461,31 @@ AI: {new_ai_content}"""
 
         # 3. 트리 저장
         self.memory_manager.save_tree()
+
+    async def _process_single_category_with_reference(self, conversation, conversation_index, category_name, existing_node_ids):
+        """단일 카테고리에 대한 대화를 처리하고 노드 ID를 반환합니다."""
+        # _process_single_category를 호출하여 노드 ID를 반환받음
+        node_id = await self._process_single_category(conversation, conversation_index, category_name)
+        return node_id
+
+    async def _add_cross_references(self, node_ids):
+        """생성된 노드들 간에 상호 참조를 추가합니다."""
+        if len(node_ids) < 2:
+            return
+        
+        for i, node_id in enumerate(node_ids):
+            node = self.memory_manager.get_node(node_id)
+            if node and hasattr(node, 'references'):
+                # 다른 모든 노드들을 참조에 추가 (자기 자신 제외)
+                for other_id in node_ids:
+                    if other_id != node_id and other_id not in node.references:
+                        node.references.append(other_id)
+                
+                if self.debug:
+                    print(f"노드 '{node.topic}'에 {len(node.references)}개 참조 추가")
+        
+        # 트리 저장
+        await self._safe_save_tree()
+        
+        if self.debug:
+            print(f"상호 참조 추가 완료: {len(node_ids)}개 노드 간 {len(node_ids)*(len(node_ids)-1)}개 참조")

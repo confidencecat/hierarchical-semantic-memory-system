@@ -1,8 +1,7 @@
 {
-  "fanout_limit": 5,
-  "max_depth": 4,
-  "k_distance": 8,
+  "fanout_limit": 2,
+  "max_depth": 100,
+  "k_distance": 3,
   "api_model": "gemini-2.5-flash",
-  "max_summary_length": 500,
-  "knn_k": 3
+  "max_summary_length": 500
 }
