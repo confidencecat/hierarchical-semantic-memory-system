@@ -125,6 +125,12 @@ class MainAI:
                 print(f"|  유형: 일반 응답")
         
         # 4. AI 응답 생성
+        if self.debug:
+            print("\n\n>> [RESPONSE] 시스템 메시지:")
+            print(f"  {system_prompt}")
+            print(">> [RESPONSE] 프롬프트:")
+            print(f"  {prompt}\n\n")
+        
         response = await self.ai_manager.call_ai_async_single(
             prompt, system_prompt
         )

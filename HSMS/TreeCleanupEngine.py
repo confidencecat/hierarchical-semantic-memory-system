@@ -49,7 +49,7 @@ class TreeCleanupEngine:
             await self._dry_run_analysis()
             return self.cleanup_stats
         
-        await self._cluster_excessive_fanouts()
+        await self.apply_fanout_to_all_parents()
         await self._resolve_cross_parent_duplicates()
         await self._merge_similar_categories()
         await self._merge_similar_leaves()
@@ -90,29 +90,47 @@ class TreeCleanupEngine:
         print(f"- 병합될 노드: {sum(len(ids)-1 for ids in duplicates.values())}개")
         print(f"- 정리될 리프: {sum(len(group)-1 for group in similar_groups)}개")
     
-    async def _cluster_excessive_fanouts(self):
-        """자식 수가 fanout_limit를 초과하는 노드들을 군집화합니다."""
+    async def apply_fanout_to_all_parents(self):
+        """모든 부모 노드에 fanout_limit 적용"""
         if self.debug:
-            print(f"군집화 단계")
+            print("모든 부모 노드에 fanout_limit 적용 시작")
         
-        for node_id, child_count in self._find_excessive_fanout_nodes():
-            node = self.memory_manager.get_node(node_id)
-            if self.debug:
-                print(f"노드 처리: '{node.topic}'")
-            start_time = time.time()
-            current_depth = self.memory_manager.get_node_depth(node_id)
-            if current_depth + 1 >= self.max_depth:
+        all_nodes = list(self.memory_manager.memory_tree.values())
+        
+        for node in all_nodes:
+            if len(node.children_ids) > self.fanout_limit:
                 if self.debug:
-                    print(f">>>> 건너뛰기: 깊이 한계 도달 ({current_depth + 1} >= {self.max_depth})")
-                continue
-            children = [self.memory_manager.get_node(cid) for cid in node.children_ids if self.memory_manager.get_node(cid)]
-            clusters = await self._cluster_nodes_by_similarity(children)
-            if self.debug:
-                print(f">> '{node.topic}' 군집화 소요시간: {time.time() - start_time:.2f}초")
-            for i, cluster in enumerate(clusters):
-                if len(cluster) >= 2:
-                    await self._create_cluster_group(node_id, cluster)
-                    self.cleanup_stats['new_groups'] += 1
+                    print(f"노드 '{node.topic}'의 자식 수 {len(node.children_ids)}개 > fanout_limit {self.fanout_limit}")
+                
+                # 초과 자식들을 클러스터링하여 그룹화
+                excess_children = node.children_ids[self.fanout_limit:]
+                await self._cluster_excess_children(node, excess_children)
+        
+        if self.debug:
+            print("모든 부모 노드에 fanout_limit 적용 완료")
+
+    async def _cluster_excess_children(self, parent_node, excess_children):
+        """초과 자식들을 클러스터링하여 그룹화"""
+        if self.debug:
+            print(f"초과 자식 {len(excess_children)}개 클러스터링 시작")
+        
+        # excess_children 노드들을 가져옴
+        excess_nodes = [self.memory_manager.get_node(cid) for cid in excess_children if self.memory_manager.get_node(cid)]
+        
+        if not excess_nodes:
+            return
+        
+        # 유사도 기반 클러스터링
+        clusters = await self._cluster_nodes_by_similarity(excess_nodes)
+        
+        # 각 클러스터에 대해 그룹 노드 생성
+        for i, cluster in enumerate(clusters):
+            if len(cluster) >= 2:
+                await self._create_cluster_group(parent_node.node_id, cluster)
+                self.cleanup_stats['new_groups'] += 1
+        
+        if self.debug:
+            print(f"초과 자식 클러스터링 완료: {len(clusters)}개 클러스터 생성")
     
     async def _cluster_nodes_by_similarity(self, nodes):
         """노드들을 유사도 기반으로 클러스터링합니다."""
@@ -251,7 +269,7 @@ class TreeCleanupEngine:
 
     def _find_excessive_fanout_nodes(self):
         """fanout_limit를 초과하는 노드들을 찾습니다."""
-        return [(nid, len(n.children_ids)) for nid, n in self.memory_manager.memory_tree.items() if len(n.children_ids) > self.fanout_limit and n.coordinates.get("start") == -1]
+        return [(nid, len(n.children_ids)) for nid, n in self.memory_manager.memory_tree.items() if len(n.children_ids) > self.fanout_limit]
 
     async def _resolve_cross_parent_duplicates(self):
         """교차 부모간 중복/유사 노드를 해결합니다."""

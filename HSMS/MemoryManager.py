@@ -344,3 +344,97 @@ class MemoryManager:
             main_node.conversation_indices = sorted(list(set(main_node.conversation_indices)))
         
         return True
+    
+    def can_add_child_with_constraints(self, parent_id, config_manager):
+        """트리 구조 제약을 고려하여 자식을 추가할 수 있는지 확인합니다."""
+        parent_node = self.get_node(parent_id)
+        if not parent_node:
+            return False, "부모 노드가 존재하지 않습니다."
+        
+        # 팬아웃 제한 확인
+        fanout_limit = config_manager.get('fanout_limit', 5)
+        current_children_count = len(parent_node.children_ids)
+        if current_children_count >= fanout_limit:
+            return False, f"팬아웃 제한 초과: 현재 {current_children_count}개, 제한 {fanout_limit}개"
+        
+        # 최대 깊이 제한 확인
+        max_depth = config_manager.get('max_depth', 5)
+        parent_depth = self.get_node_depth(parent_id)
+        if parent_depth + 1 > max_depth:
+            return False, f"최대 깊이 초과: 현재 깊이 {parent_depth}, 최대 깊이 {max_depth}"
+        
+        return True, "제약 조건을 만족합니다."
+
+    def calculate_node_distance(self, node_id1, node_id2):
+        """두 노드 간의 최단 거리를 계산합니다 (간선 수 기반)."""
+        if node_id1 == node_id2:
+            return 0
+        
+        # BFS를 사용하여 최단 경로 찾기
+        visited = set()
+        queue = [(node_id1, 0)]  # (node_id, distance)
+        
+        while queue:
+            current_id, distance = queue.pop(0)
+            
+            if current_id in visited:
+                continue
+            visited.add(current_id)
+            
+            if current_id == node_id2:
+                return distance
+            
+            # 인접 노드 탐색 (부모와 자식)
+            current_node = self.get_node(current_id)
+            if not current_node:
+                continue
+            
+            # 부모 노드
+            if current_node.parent_id and current_node.parent_id not in visited:
+                queue.append((current_node.parent_id, distance + 1))
+            
+            # 자식 노드들
+            for child_id in current_node.children_ids:
+                if child_id not in visited:
+                    queue.append((child_id, distance + 1))
+        
+        # 경로가 없는 경우 (서로 다른 서브트리에 있는 경우)
+        return float('inf')
+
+    def get_nodes_within_k_distance(self, target_node_id, k):
+        """특정 노드로부터 K-거리 이내의 모든 노드를 수집합니다."""
+        nearby_nodes = []
+        visited = set()
+        queue = [(target_node_id, 0)]  # (node_id, distance)
+        
+        while queue:
+            current_id, distance = queue.pop(0)
+            
+            if current_id in visited or distance > k:
+                continue
+            
+            visited.add(current_id)
+            current_node = self.get_node(current_id)
+            
+            if current_node and current_id != target_node_id:
+                nearby_nodes.append(current_node)
+            
+            if distance < k:
+                # 부모 방향 탐색
+                if current_node and current_node.parent_id:
+                    queue.append((current_node.parent_id, distance + 1))
+                
+                # 자식 방향 탐색
+                if current_node:
+                    for child_id in current_node.children_ids:
+                        queue.append((child_id, distance + 1))
+                
+                # 형제 노드 탐색 (같은 부모를 가진 노드들)
+                if current_node and current_node.parent_id:
+                    parent_node = self.get_node(current_node.parent_id)
+                    if parent_node:
+                        for sibling_id in parent_node.children_ids:
+                            if sibling_id != current_id:
+                                queue.append((sibling_id, distance + 1))
+        
+        return nearby_nodes

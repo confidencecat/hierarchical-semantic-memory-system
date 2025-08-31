@@ -49,27 +49,27 @@ LOCAL_CONFIG = load_local_config()
 
 def get_config_value(key):
     value = LOCAL_CONFIG.get(key, DEFAULT_CONFIG.get(key))
-    if key == 'knn_k':
+    if key == 'k_distance':  # knn_k를 k_distance로 변경
         min_k = 2
         max_k = 50
         if value < min_k:
-            print(f"[경고] knn_k 값이 너무 작음({value}), 최소값 {min_k}로 자동 조정.")
+            print(f"[경고] k_distance 값이 너무 작음({value}), 최소값 {min_k}로 자동 조정.")
             return min_k
         if value > max_k:
-            print(f"[경고] knn_k 값이 너무 큼({value}), 최대값 {max_k}로 자동 조정.")
+            print(f"[경고] k_distance 값이 너무 큼({value}), 최대값 {max_k}로 자동 조정.")
             return max_k
     return value
 
 def set_config_value(key, value):
-    # knn_k validation
-    if key == 'knn_k':
+    # k_distance validation
+    if key == 'k_distance':
         min_k = 2
         max_k = 50
         if value < min_k:
-            print(f"[경고] knn_k 값이 너무 작음({value}), 최소값 {min_k}로 자동 조정.")
+            print(f"[경고] k_distance 값이 너무 작음({value}), 최소값 {min_k}로 자동 조정.")
             value = min_k
         if value > max_k:
-            print(f"[경고] knn_k 값이 너무 큼({value}), 최대값 {max_k}로 자동 조정.")
+            print(f"[경고] k_distance 값이 너무 큼({value}), 최대값 {max_k}로 자동 조정.")
             value = max_k
     LOCAL_CONFIG[key] = value
     save_local_config(LOCAL_CONFIG)
@@ -145,6 +145,13 @@ class Config:
         """argparse로 받은 인자를 설정에 반영하고 저장합니다."""
         changed = False
         args_dict = vars(args)
+        
+        # 특별 매핑: k -> k_distance, model -> api_model
+        if hasattr(args, 'k') and args.k is not None:
+            args_dict['k_distance'] = args.k
+        if hasattr(args, 'model') and args.model is not None:
+            args_dict['api_model'] = args.model
+        
         for key in DEFAULT_CONFIG:
             if key in args_dict and args_dict[key] is not None:
                 if self.get(key) != args_dict[key]:

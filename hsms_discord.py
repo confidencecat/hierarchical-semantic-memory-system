@@ -97,6 +97,10 @@ async def help_command(ctx):
         `!clear` - 서버의 기억 초기화 (관리자만)
         `!force [on/off]` - 강제 검색 모드 토글 (관리자만)
         `!debug [on/off]` - 디버그 모드 토글 (관리자만)
+        `!fanout <값>` - 팬아웃 제한 설정 (관리자만)
+        `!maxdepth <값>` - 최대 트리 깊이 설정 (관리자만)
+        `!model <모델명>` - AI 모델 설정 (관리자만)
+        `!k <값>` - K-거리 검색 설정 (관리자만)
         """,
         inline=False
     )
@@ -298,9 +302,82 @@ async def debug_command(ctx, mode=None):
         print(f"|| 오류: 디버그 모드 명령어 처리 중 오류: {e}")
         await ctx.send("디버그 모드 설정 중 오류가 발생했습니다.")
 
+@bot.command(name='fanout', aliases=['팬아웃'])
+@commands.has_permissions(administrator=True)
+async def set_fanout(ctx, value: int):
+    """팬아웃 제한 설정 변경 (관리자 전용)"""
+    try:
+        if value < 1 or value > 20:
+            await ctx.send("|| 오류: 팬아웃 값은 1-20 사이여야 합니다.")
+            return
+        
+        from config import set_config_value
+        set_config_value('fanout_limit', value)
+        await ctx.send(f"|| 설정 변경: 팬아웃 제한을 {value}로 변경했습니다.")
+        
+    except Exception as e:
+        print(f"|| 오류: 팬아웃 설정 변경 중 오류: {e}")
+        await ctx.send("팬아웃 설정 변경 중 오류가 발생했습니다.")
+
+@bot.command(name='maxdepth', aliases=['최대깊이'])
+@commands.has_permissions(administrator=True)
+async def set_max_depth(ctx, value: int):
+    """최대 트리 깊이 설정 변경 (관리자 전용)"""
+    try:
+        if value < 3 or value > 10:
+            await ctx.send("|| 오류: 최대 깊이 값은 3-10 사이여야 합니다.")
+            return
+        
+        from config import set_config_value
+        set_config_value('max_depth', value)
+        await ctx.send(f"|| 설정 변경: 최대 트리 깊이를 {value}로 변경했습니다.")
+        
+    except Exception as e:
+        print(f"|| 오류: 최대 깊이 설정 변경 중 오류: {e}")
+        await ctx.send("최대 깊이 설정 변경 중 오류가 발생했습니다.")
+
+@bot.command(name='model', aliases=['모델'])
+@commands.has_permissions(administrator=True)
+async def set_model(ctx, model_name: str):
+    """AI 모델 설정 변경 (관리자 전용)"""
+    try:
+        valid_models = ['gemini-1.5-flash', 'gemini-2.5-flash', 'gemini-pro']
+        if model_name not in valid_models:
+            await ctx.send(f"|| 오류: 지원되는 모델: {', '.join(valid_models)}")
+            return
+        
+        from config import set_config_value
+        set_config_value('api_model', model_name)
+        await ctx.send(f"|| 설정 변경: AI 모델을 {model_name}으로 변경했습니다.")
+        
+    except Exception as e:
+        print(f"|| 오류: 모델 설정 변경 중 오류: {e}")
+        await ctx.send("모델 설정 변경 중 오류가 발생했습니다.")
+
+@bot.command(name='k', aliases=['케이'])
+@commands.has_permissions(administrator=True)
+async def set_k_distance(ctx, value: int):
+    """K-거리 검색 설정 변경 (관리자 전용)"""
+    try:
+        if value < 1 or value > 10:
+            await ctx.send("|| 오류: K 값은 1-10 사이여야 합니다.")
+            return
+        
+        from config import set_config_value
+        set_config_value('k_distance', value)
+        await ctx.send(f"|| 설정 변경: K-거리 검색 값을 {value}로 변경했습니다.")
+        
+    except Exception as e:
+        print(f"|| 오류: K-거리 설정 변경 중 오류: {e}")
+        await ctx.send("K-거리 설정 변경 중 오류가 발생했습니다.")
+
 @clear_command.error
 @force_command.error
 @debug_command.error
+@set_fanout.error
+@set_max_depth.error
+@set_model.error
+@set_k_distance.error
 async def permission_error(ctx, error):
     """권한 오류 처리"""
     if isinstance(error, commands.MissingPermissions):

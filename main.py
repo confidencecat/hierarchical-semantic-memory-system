@@ -3,7 +3,7 @@ import argparse
 import time
 # 새로운 모듈 구조에서 클래스 임포트
 from HSMS import MainAI, MemoryManager, TreeCleanupEngine
-from config import API_KEY, LOAD_API_KEYS, SHORT_TEST_QUESTIONS, TEST_QUESTIONS, RECORD_TEST_QUESTIONS
+from config import API_KEY, LOAD_API_KEYS, SHORT_TEST_QUESTIONS, TEST_QUESTIONS, RECORD_TEST_QUESTIONS, config
 
 
 def parse_arguments():
@@ -73,6 +73,18 @@ def parse_arguments():
         type=int,
         default=0,
         help='검색 결과에서 반환할 최대 대화 수 (0이면 모든 관련 대화 반환, 기본값: 0)'
+    )
+    parser.add_argument(
+        '--k',
+        type=int,
+        default=3,
+        help='K-distance search에서 사용할 k 값 (노드 간 거리 제한)'
+    )
+    parser.add_argument(
+        '--model',
+        type=str,
+        default='gemini-2.5-flash',
+        help='사용할 AI 모델 (gemini-1.5-flash, gemini-2.5-flash 등)'
     )
     parser.add_argument(
         '--question',
@@ -469,6 +481,9 @@ def main_ai(prompt='False', max_depth=4, top_search_n=0):
 if __name__ == '__main__':
     args = parse_arguments()
     
+    # 설정 업데이트
+    config.update_from_args(args)
+    
     # --force-record와 --no-record 동시 사용 방지
     if args.force_record and args.no_record:
         print("오류: --force-record와 --no-record는 동시에 사용할 수 없습니다.")
@@ -512,7 +527,7 @@ if __name__ == '__main__':
     
     # tree나 api_info만 요청한 경우 종료
     if args.tree or args.api_info:
-        if not (args.mode in ['test', 'chat', 'discord', 'search']):
+        if not hasattr(args, 'mode') or args.mode not in ['test', 'chat', 'discord', 'search']:
             exit(0)
     
     force_search = getattr(args, 'force_search', False)
@@ -530,3 +545,10 @@ if __name__ == '__main__':
         run_discord_mode(debug=args.debug)
     elif args.mode == 'search':
         asyncio.run(run_search_mode(debug=args.debug, max_depth=args.max_depth, top_search_n=args.top_search_n))
+
+
+if __name__ == '__main__':
+    args = parse_arguments()
+    
+    # 설정 업데이트
+    config.update_from_args(args)
