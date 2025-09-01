@@ -48,12 +48,29 @@ class TreeCleanupEngine:
         if dry_run:
             print("\n=== 드라이런 모드: 변경 계획만 출력 ===")
             await self._dry_run_analysis()
-            return self.cleanup_stats
+            return
+
+        # === 간단하고 빠른 정리: fanout_limit만 적용 ===
+        
+        # 1단계: fanout_limit 적용 (클러스터링)
+        await self._enforce_fanout_limits()
+        
+        # 마지막: 모든 부모 노드 요약 병렬 업데이트
+        await self._update_all_parent_summaries_parallel()
+
+        self.cleanup_stats['end_time'] = time.time()
+        duration = self.cleanup_stats['end_time'] - self.cleanup_stats['start_time']
+        
+        if self.debug:
+            print(f"트리 정리 완료 ({duration:.1f}초)")
 
         await self.apply_fanout_to_all_parents()
         await self._resolve_cross_parent_duplicates()
         await self._merge_similar_categories()
         await self._merge_similar_leaves()
+
+        # 모든 부모 노드를 병렬로 업데이트
+        await self._update_all_parent_summaries_parallel()
 
         if rename_nodes:
             await self._rename_nodes()
@@ -110,57 +127,49 @@ class TreeCleanupEngine:
             print("모든 부모 노드에 fanout_limit 적용 완료")
 
     async def _simple_group_excess_children(self, parent_node):
-        """초과 자식들을 간단하게 그룹화"""
+        """초과 자식들을 클러스터링하여 fanout_limit를 엄격하게 준수"""
         if len(parent_node.children_ids) <= self.fanout_limit:
             return
 
         if self.debug:
-            print(f"간단 그룹화 시작: {len(parent_node.children_ids)}개 -> 최대 {self.fanout_limit}개")
+            print(f"클러스터링 시작: {len(parent_node.children_ids)}개 -> 최대 {self.fanout_limit}개")
 
-        # 초과 자식들을 2개 그룹으로 분할
-        excess_children = parent_node.children_ids[self.fanout_limit:]
-        group_size = max(1, len(excess_children) // 2)
+        # 간단한 접근: fanout_limit까지는 그대로 두고, 나머지는 그룹화
+        children_to_keep = parent_node.children_ids[:self.fanout_limit-1]  # 하나 자리를 그룹을 위해 비워둠
+        children_to_group = parent_node.children_ids[self.fanout_limit-1:]
+        
+        if not children_to_group:
+            return
+            
+        # 초과 자식들을 하나의 그룹으로 통합
+        group_nodes = [self.memory_manager.get_node(cid) for cid in children_to_group if self.memory_manager.get_node(cid)]
+        if not group_nodes:
+            return
+            
+        group_name = await self._generate_cluster_group_name(group_nodes)
+        
+        # 새 그룹 노드 생성
+        group_node = MemoryNode(
+            topic=group_name,
+            summary=f"{group_name} 관련 개념들",
+            parent_id=parent_node.node_id,
+            coordinates={"start": -1, "end": -1}
+        )
+        self.memory_manager.add_node(group_node, parent_node.node_id)
 
-        # 첫 번째 그룹
-        group1_children = excess_children[:group_size]
-        if group1_children:
-            group1_name = await self._generate_simple_group_name([self.memory_manager.get_node(cid) for cid in group1_children if self.memory_manager.get_node(cid)])
-            group1_node = MemoryNode(
-                topic=group1_name,
-                summary=f"{group1_name} 관련 그룹",
-                parent_id=parent_node.node_id,
-                coordinates={"start": -1, "end": -1}
-            )
-            self.memory_manager.add_node(group1_node, parent_node.node_id)
+        # 초과 자식들을 그룹으로 이동
+        for child_id in children_to_group:
+            self.memory_manager.reparent_node(child_id, group_node.node_id)
 
-            # 자식들을 그룹으로 이동
-            for child_id in group1_children:
-                self.memory_manager.reparent_node(child_id, group1_node.node_id)
-
-        # 두 번째 그룹 (남은 자식들)
-        group2_children = excess_children[group_size:]
-        if group2_children:
-            group2_name = await self._generate_simple_group_name([self.memory_manager.get_node(cid) for cid in group2_children if self.memory_manager.get_node(cid)])
-            group2_node = MemoryNode(
-                topic=group2_name,
-                summary=f"{group2_name} 관련 그룹",
-                parent_id=parent_node.node_id,
-                coordinates={"start": -1, "end": -1}
-            )
-            self.memory_manager.add_node(group2_node, parent_node.node_id)
-
-            # 자식들을 그룹으로 이동
-            for child_id in group2_children:
-                self.memory_manager.reparent_node(child_id, group2_node.node_id)
-
-        # 부모 노드 요약 업데이트
-        if hasattr(self.memory_manager, 'get_node'):
-            from .AuxiliaryAI import AuxiliaryAI
-            auxiliary_ai = AuxiliaryAI(self.memory_manager, debug=self.debug)
-            await auxiliary_ai.update_parent_summary(parent_node)
-
-        if self.debug:
-            print(f"그룹화 완료: {len(group1_children) + len(group2_children)}개 노드를 2개 그룹으로 분할")
+        # 최종 검증
+        final_count = len(parent_node.children_ids)
+        if final_count > self.fanout_limit:
+            if self.debug:
+                print(f"경고: 클러스터링 후에도 fanout_limit 초과 ({final_count} > {self.fanout_limit})")
+        else:
+            if self.debug:
+                original_count = final_count + len(children_to_group)
+                print(f"클러스터링 완료: {original_count}개 → {final_count}개 (limit: {self.fanout_limit})")
 
     async def _generate_simple_group_name(self, nodes):
         """노드들을 기반으로 간단한 그룹 이름을 생성합니다."""
@@ -168,6 +177,47 @@ class TreeCleanupEngine:
             return "기타 그룹"
 
         topics = [node.topic for node in nodes if node.topic != "ROOT"]
+        
+    async def _generate_cluster_group_name(self, nodes):
+        """클러스터링된 노드들을 기반으로 의미있는 그룹 이름을 생성합니다."""
+        if not nodes:
+            return "기타 그룹"
+
+        # 노드들의 토픽과 요약을 수집
+        topics = [node.topic for node in nodes if node.topic != "ROOT"]
+        summaries = [node.summary[:100] for node in nodes if node.summary]
+        
+        if len(topics) <= 2:
+            # 적은 수의 노드는 단순 결합
+            return " & ".join(topics[:2])
+        
+        # AI를 통해 의미있는 그룹명 생성
+        try:
+            prompt = f"""다음 개념들을 포괄하는 적절한 카테고리명을 한국어로 제안해주세요:
+
+개념들: {', '.join(topics)}
+요약: {' | '.join(summaries[:3])}
+
+요구사항:
+- 2-4글자의 간결한 카테고리명
+- 모든 개념을 포괄할 수 있는 상위 개념
+- 예시: "물리학", "생물학", "기초과학", "실용정보" 등
+
+카테고리명:"""
+            
+            group_name = await self.ai_manager.call_ai_async_single(prompt, "클러스터 그룹명 생성")
+            group_name = group_name.strip().replace('"', '').replace("'", '')
+            
+            # 길이 제한
+            if len(group_name) > 10:
+                group_name = group_name[:10]
+                
+            return group_name if group_name else "관련 개념"
+            
+        except Exception as e:
+            if self.debug:
+                print(f"그룹명 생성 실패: {e}")
+            return "관련 개념"
         if len(topics) <= 2:
             return " & ".join(topics[:2]) if topics else "기타 그룹"
 
@@ -203,8 +253,8 @@ class TreeCleanupEngine:
         nodes = [self.memory_manager.get_node(nid) for nid in node_ids]
         
         # 카테고리 노드와 대화 노드 분리
-        category_nodes = [n for n in nodes if n.coordinates["start"] == -1]
-        talk_nodes = [n for n in nodes if n.coordinates["start"] != -1]
+        category_nodes = [n for n in nodes if n.is_category_node()]
+        talk_nodes = [n for n in nodes if n.is_talk_node()]
         
         # 카테고리 노드들끼리만 병합
         if len(category_nodes) > 1:
@@ -246,6 +296,9 @@ class TreeCleanupEngine:
         # 소스 노드 제거
         self._remove_node(source_node.node_id)
 
+        # 병합 후 부모 노드 요약 업데이트는 마지막에 병렬로 처리
+        # (개별 업데이트 제거하여 중복 방지)
+
         if self.debug:
             print(f"카테고리 병합 완료: '{source_node.topic}' -> '{target_node.topic}'")
             print(f"  - 최종 자식 수: {len(target_node.children_ids)}")
@@ -274,6 +327,9 @@ class TreeCleanupEngine:
 
         # 소스 노드 제거
         self._remove_node(source_node.node_id)
+
+        # 병합 후 부모 노드 요약 업데이트는 마지막에 병렬로 처리
+        # (개별 업데이트 제거하여 중복 방지)
 
         if self.debug:
             print(f"대화 병합 완료: '{source_node.topic}' -> '{target_node.topic}'")
@@ -415,7 +471,7 @@ class TreeCleanupEngine:
 
         if self.debug: print(f">> 카테고리 병합: {[n.topic for n in nodes]} -> '{representative.topic}'")
 
-        # 대표 노드와 나머지 노드들의 summary를 순차적으로 병합
+        # 모든 자식 노드들을 대표 노드로 이동
         for node in nodes:
             if node.node_id != representative.node_id:
                 for child_id in node.children_ids:
@@ -425,6 +481,83 @@ class TreeCleanupEngine:
                 representative.summary = await self._generate_merged_summary(representative, node)
                 self._remove_node(node.node_id)
                 self.cleanup_stats['merges'] += 1
+
+        # 병합 완료 후 대표 노드의 주제와 요약을 자식들에 맞게 재생성
+        await self._update_merged_category_topic_and_summary(representative)
+
+    async def _update_merged_category_topic_and_summary(self, category_node):
+        """병합된 카테고리 노드의 주제와 요약을 자식 노드들에 맞게 업데이트합니다."""
+        if not category_node.children_ids:
+            return
+        
+        # 자식 노드들의 정보 수집
+        child_nodes = [self.memory_manager.get_node(cid) for cid in category_node.children_ids]
+        child_nodes = [c for c in child_nodes if c]  # None 제거
+        
+        if not child_nodes:
+            return
+        
+        child_topics = [c.topic for c in child_nodes]
+        child_summaries = [c.summary for c in child_nodes]
+        
+        # 새로운 주제 생성
+        old_topic = category_node.topic
+        topic_prompt = f"""
+        다음 하위 주제들을 포괄하는 적절한 상위 카테고리명을 2-8자의 한국어로 생성하라:
+        하위 주제들: {', '.join(child_topics)}
+        
+        기존 주제: {old_topic}
+        
+        원칙:
+        - 모든 하위 주제들을 포괄할 수 있는 상위 개념
+        - 2-8자의 간결한 한국어
+        - 구체적이면서도 포괄적인 표현
+        - 예: "지구 위성", "태양계 최대 행성", "물 화학식" → "우주와 물질"
+        - 예: "피타고라스 정리", "뉴턴 제1법칙" → "물리수학 법칙"
+        
+        오직 카테고리명만 답변하라.
+        """
+        
+        try:
+            new_topic = await self.ai_manager.call_ai_async_single(topic_prompt, "카테고리 주제 생성")
+            new_topic = new_topic.strip()[:20]  # 최대 20자 제한
+            
+            if new_topic and new_topic != old_topic:
+                category_node.topic = new_topic
+                if self.debug:
+                    print(f">> 병합 카테고리 주제 업데이트: '{old_topic}' -> '{new_topic}'")
+        except Exception as e:
+            if self.debug:
+                print(f">> [ERROR] 카테고리 주제 업데이트 실패: {e}")
+        
+        # 새로운 요약 생성 (자식 노드들의 구체적 내용 반영)
+        summary_prompt = f"""
+        다음 하위 주제들을 포괄하는 카테고리의 요약을 생성하라:
+        
+        카테고리명: {category_node.topic}
+        하위 주제들과 내용:
+        {chr(10).join([f"- {topics}: {summaries}" for topics, summaries in zip(child_topics[:5], child_summaries[:5])])}
+        
+        이 카테고리가 포함하는 실제 내용을 반영하여 요약하라.
+        구체적인 하위 주제들이 무엇을 다루는지 명시적으로 언급하라.
+        예: "지구의 자연 위성인 달과 태양계 최대 행성인 목성에 관한 정보"
+        예: "물의 화학적 조성과 피타고라스 정리 등 기초 과학 개념들"
+        
+        최대 120자 이내로 작성하라.
+        """
+        
+        try:
+            new_summary = await self.ai_manager.call_ai_async_single(summary_prompt, "카테고리 요약 생성")
+            new_summary = new_summary.strip()[:120]  # 최대 120자 제한
+            
+            if new_summary:
+                old_summary = category_node.summary
+                category_node.summary = new_summary
+                if self.debug:
+                    print(f">> 병합 카테고리 요약 업데이트 완료 (길이: {len(new_summary)}자)")
+        except Exception as e:
+            if self.debug:
+                print(f">> [ERROR] 카테고리 요약 업데이트 실패: {e}")
 
     async def _find_similar_leaf_groups(self):
         """유사한 리프 노드 그룹들을 찾습니다."""
@@ -603,13 +736,33 @@ class TreeCleanupEngine:
 노드2: "{node2.topic}"  
 노드2 설명: {node2.summary}
 
-위 두 노드가 같은 상위 그룹으로 묶일 만큼 유사한가요?"""
+위 두 노드가 **정확히 동일한 세부 주제**이거나 **직접적인 상위/하위 관계**인가요?
+완전히 다른 주제는 절대 병합하지 마라.
+
+예시:
+- "지구 위성" + "달의 특성" → True (직접적 관련)
+- "지구 위성" + "물의 화학식" → False (완전히 다른 주제)
+- "수학 이론" + "기하학" → True (직접적 상위/하위)
+- "수학 이론" + "화학 원소" → False (완전히 다른 주제)"""
                 queries.append(prompt)
                 pairs.append((i, j))
         
         if queries:
-            system_prompt = """두 노드의 유사성을 판단하라.
-같은 상위 카테고리로 묶이기에 충분히 유사하면 "True", 그렇지 않으면 "False"로 답하라."""
+            system_prompt = """두 노드가 **정확히 동일한 세부 주제**이거나 **직접적인 상위/하위 관계**인지만 판단하라.
+
+❌ 병합하지 말아야 할 경우:
+- 서로 다른 학문 분야 (물리학 vs 화학)
+- 서로 다른 주제 영역 (천문학 vs 수학)  
+- 간접적 연관성만 있는 경우
+- 같은 큰 범주라는 이유만으로 연결되는 경우
+
+✅ 병합해야 할 경우만:
+- 정확히 동일한 주제
+- 직접적인 상위/하위 개념 관계
+- 실질적으로 같은 맥락에서 다뤄지는 주제
+
+확실하지 않으면 무조건 "False"로 답하라.
+반드시 "True" 또는 "False"로만 답하라."""
             
             results = await self.ai_manager.call_ai_async_multiple(
                 queries, system_prompt, fine=NODE_SIMILARITY_FINE
@@ -617,7 +770,7 @@ class TreeCleanupEngine:
             
             for k, (i, j) in enumerate(pairs):
                 is_similar = results[k].strip().lower() == 'true'
-                similarity = 0.8 if is_similar else 0.2  # 임계값 설정
+                similarity = 0.95 if is_similar else 0.05  # 더욱 엄격한 임계값 설정
                 similarity_matrix[i][j] = similarity
                 similarity_matrix[j][i] = similarity  # 대칭 복사
         
@@ -629,8 +782,8 @@ class TreeCleanupEngine:
         if n <= 1:
             return [nodes] if nodes else []
         
-        # 인접 리스트 구성 (유사도 임계값 0.7 이상)
-        threshold = 0.7
+        # 인접 리스트 구성 (유사도 임계값 0.9 이상으로 매우 엄격하게)
+        threshold = 0.9
         adjacency = [[] for _ in range(n)]
         
         for i in range(n):
@@ -657,3 +810,74 @@ class TreeCleanupEngine:
                 clusters.append(cluster)
         
         return clusters
+
+    async def _update_all_parent_summaries_parallel(self):
+        """모든 부모 노드들의 요약을 병렬로 업데이트합니다."""
+        if self.debug:
+            print("\n--- 최종 단계: 모든 부모 노드 요약 병렬 업데이트 ---")
+        
+        # 자식이 있는 모든 노드 (ROOT 제외)
+        parent_nodes = []
+        for node_id, node in self.memory_manager.memory_tree.items():
+            if node.children_ids and node.topic != "ROOT":
+                parent_nodes.append(node)
+        
+        if not parent_nodes:
+            return
+        
+        if self.debug:
+            print(f">> {len(parent_nodes)}개 부모 노드 병렬 업데이트 시작...")
+            start_time = time.time()
+        
+        from .AuxiliaryAI import AuxiliaryAI
+        auxiliary_ai = AuxiliaryAI(self.memory_manager, debug=False)  # 개별 디버그 끄기
+        
+        # 진짜 병렬로 실행하기 위해 create_task 사용
+        tasks = []
+        for i, node in enumerate(parent_nodes):
+            task = asyncio.create_task(
+                auxiliary_ai.update_topic_and_summary(node, recursive=False),
+                name=f"update_parent_{i}_{node.topic}"
+            )
+            tasks.append(task)
+        
+        # 모든 업데이트를 병렬로 실행하고 결과 대기
+        try:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # 에러 체크
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    if self.debug:
+                        print(f"부모 노드 업데이트 실패 {parent_nodes[i].topic}: {result}")
+                        
+        except Exception as e:
+            if self.debug:
+                print(f"병렬 업데이트 중 오류: {e}")
+        
+        if self.debug:
+            elapsed = time.time() - start_time
+            print(f">> {len(parent_nodes)}개 부모 노드 병렬 업데이트 완료 ({elapsed:.2f}초)")
+
+    async def _refresh_merged_category_summaries(self, merged_nodes):
+        """병합된 카테고리 노드들의 요약을 자식 내용 기반으로 새로 고침합니다."""
+        if not merged_nodes:
+            return
+        
+        if self.debug:
+            print(f"\n--- 병합된 {len(merged_nodes)}개 카테고리 요약 새로고침 ---")
+        
+        from .AuxiliaryAI import AuxiliaryAI
+        auxiliary_ai = AuxiliaryAI(self.memory_manager, debug=self.debug)
+        
+        # 각 병합된 노드를 병렬로 업데이트
+        tasks = []
+        for node in merged_nodes:
+            # 강제로 자식 내용 기반 요약 재생성
+            task = auxiliary_ai.update_topic_and_summary(node, recursive=False)
+            tasks.append(task)
+        
+        await asyncio.gather(*tasks, return_exceptions=True)
+        
+        if self.debug:
+            print(f">> 병합된 카테고리 요약 새로고침 완료")

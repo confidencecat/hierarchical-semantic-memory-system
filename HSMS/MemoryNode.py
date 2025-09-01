@@ -38,6 +38,14 @@ class MemoryNode:
         """이 노드가 가진 대화 수 반환"""
         return len(self.conversation_indices)
     
+    def is_category_node(self):
+        """카테고리 노드인지 확인 (좌표가 -1, -1인 경우)"""
+        return self.coordinates["start"] == -1 and self.coordinates["end"] == -1
+    
+    def is_talk_node(self):
+        """대화 노드인지 확인 (카테고리 노드가 아닌 경우)"""
+        return not self.is_category_node()
+    
     def to_dict(self):
         return {
             'node_id': self.node_id,

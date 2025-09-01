@@ -77,12 +77,25 @@ class MemoryManager:
         return self.memory_tree.get(self.root_node_id)
     
     def add_node(self, node, parent_id=None):
-        """새 노드를 트리에 추가합니다."""
+        """새 노드를 트리에 추가합니다. fanout_limit을 사전에 체크합니다."""
         if self.debug:
             print(f"    ┌─ [MEMORY] 노드 추가")
             print(f"    │  노드 ID: {node.node_id}")
             print(f"    │  토픽: {node.topic}")
             print(f"    │  부모 ID: {parent_id}")
+        
+        # fanout_limit 사전 체크
+        if parent_id and parent_id in self.memory_tree:
+            parent_node = self.memory_tree[parent_id]
+            from config import get_config_value
+            fanout_limit = get_config_value('fanout_limit')
+            
+            # 추가하려는 노드가 fanout_limit을 초과하게 만드는지 체크
+            if len(parent_node.children_ids) >= fanout_limit:
+                if self.debug:
+                    print(f"    │  ⚠️  fanout_limit 초과 위험: {len(parent_node.children_ids)} >= {fanout_limit}")
+                    print(f"    └─ 노드 추가 거부 - fanout_limit 보호")
+                return False  # 추가 거부
         
         self.memory_tree[node.node_id] = node
         if parent_id and parent_id in self.memory_tree:
@@ -98,6 +111,7 @@ class MemoryManager:
             print(f"    └─ 노드 추가 완료")
         
         self.save_tree()
+        return True  # 추가 성공
     
     def update_node(self, node_id, **kwargs):
         """노드 정보를 업데이트합니다."""

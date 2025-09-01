@@ -5,12 +5,13 @@ from config import (CATEGORY_RELEVANCE_FINE,
 from .AIManager import AIManager
 from .KDistanceSearch import KDistanceSearch
 from .MemoryNode import MemoryNode
+from .SmartTopicUpdater import SmartTopicUpdater
 
 
 class AuxiliaryAI:
     """보조 인공지능 - 계층적 기억 관리 시스템의 핵심 컨트롤러"""
     
-    def __init__(self, memory_manager, debug=False, short_debug=False, max_depth=None, top_search_n=None):
+    def __init__(self, memory_manager, debug=False, short_debug=False, max_depth=None, top_search_n=None, update_topic='smart', topic_threshold=0.7, flexible_depth=False):
         from config import get_config_value
         self.memory_manager = memory_manager
         self.ai_manager = AIManager(debug=debug, short_debug=short_debug)
@@ -19,7 +20,24 @@ class AuxiliaryAI:
         self.short_debug = short_debug
         self.max_depth = max_depth if max_depth is not None else get_config_value('max_depth')
         self.top_search_n = top_search_n if top_search_n is not None else get_config_value('top_search_n')
+        self.update_topic = update_topic
+        self.flexible_depth = flexible_depth
         self._save_lock = asyncio.Lock()  # save_tree 동기화를 위한 락
+        
+        # SmartTopicUpdater 초기화
+        if self.update_topic in ['always', 'smart']:
+            self.topic_updater = SmartTopicUpdater(
+                self.ai_manager, 
+                similarity_threshold=topic_threshold, 
+                debug=self.debug,
+                update_mode=self.update_topic
+            )
+            if self.debug:
+                print(f">> [CONFIG] 토픽 업데이트 모드: {self.update_topic} (임계값: {topic_threshold})")
+        else:
+            self.topic_updater = None
+            if self.debug:
+                print(f">> [CONFIG] 토픽 업데이트 비활성화")
 
     async def update_topic_and_summary(self, node, recursive=False):
         """
@@ -53,38 +71,71 @@ class AuxiliaryAI:
                 print(f"[ERROR] 주제 생성 실패: {e}")
             new_topic = node.topic
         
-        # 자식 노드 요약 결합
-        combined_child_summaries = '; '.join(child_summaries)
+        # 부모 노드 타입에 따른 요약 생성 로직
         max_length = get_config_value('max_summary_length')
         
-        if len(combined_child_summaries) > max_length:
-            # 길이가 초과되면 AI로 요약
-            print(f"📝 [요약 시작] 자식 노드 요약이 {len(combined_child_summaries)}자 > {max_length}자 제한을 초과하여 AI 요약을 시작합니다...")
-            
-            summary_prompt = f"""
-            다음 자식 노드 요약들을 {max_length}자 이내로 요약하라.
-            
-            중요한 지시사항:
-            - 사용자가 한 말, 키워드, 구체적인 용어, 고유명사, 숫자, 날짜 등을 중요도를 따지지 않고 모두 유지하라
-            - 원래 내용의 핵심 의미와 세부사항을 최대한 보존하라
-            - 요약하되 정보 손실을 최소화하라
-            - 사용자의 질문, AI의 답변, 구체적인 사실 관계를 모두 포함하라
-            - 전문 용어와 기술적 세부사항을 우선적으로 유지하라
-            
-            요약할 내용:
-            {combined_child_summaries}
-            """
-            try:
-                new_summary = await self.ai_manager.call_ai_async_single(summary_prompt, "요약 생성")
-                if len(new_summary) > max_length:
-                    new_summary = new_summary[:max_length].rstrip() + "..."
-                print(f"✅ [요약 완료] 자식 노드 요약이 {len(new_summary)}자로 요약되었습니다.")
-            except Exception as e:
-                if self.debug:
-                    print(f"[ERROR] 요약 생성 실패: {e}")
-                new_summary = combined_child_summaries[:max_length].rstrip() + "..."
+        if node.topic == "ROOT":
+            # 루트 노드의 경우: 카테고리 노드들의 주제만 나열하는 간결한 요약
+            child_categories = [c.topic for c in child_nodes if c]
+            if child_categories:
+                new_summary = f"이 시스템은 다음 주요 분야들에 대한 대화를 포함합니다: {', '.join(child_categories)}"
+            else:
+                new_summary = "계층적 기억 시스템의 최상위 노드입니다."
+        elif node.coordinates.get("start") == -1:  # 카테고리 노드
+            # 카테고리 노드의 경우: 하위 대화들의 공통 주제를 메타 수준에서 설명
+            if child_summaries:
+                category_summary_prompt = f"""
+                다음은 '{node.topic}' 카테고리 하위의 대화 요약들입니다:
+                {'; '.join(child_summaries)}
+                
+                이 카테고리가 다루는 주요 내용을 메타 수준에서 간결하게 설명하라.
+                구체적인 대화 내용을 반복하지 말고, 이 카테고리의 전반적인 성격과 범위를 설명하라.
+                
+                예시:
+                - "위성과 천체에 관한 다양한 질문과 답변들"
+                - "화학 원소와 분자 구조에 대한 학습 내용들"
+                - "개인 정보와 취향에 관한 대화들"
+                
+                최대 {max_length//2}자 이내로 작성하라.
+                """
+                try:
+                    new_summary = await self.ai_manager.call_ai_async_single(category_summary_prompt, "카테고리 요약 생성")
+                    if len(new_summary) > max_length//2:
+                        new_summary = new_summary[:max_length//2].rstrip() + "..."
+                except Exception as e:
+                    if self.debug:
+                        print(f"[ERROR] 카테고리 요약 생성 실패: {e}")
+                    new_summary = f"{node.topic}에 관한 {len(child_summaries)}개의 대화가 포함되어 있습니다."
+            else:
+                new_summary = f"{node.topic}에 관한 카테고리입니다."
         else:
-            new_summary = combined_child_summaries
+            # 대화 노드의 경우: 기존 로직 유지 (자식 노드 요약 결합)
+            combined_child_summaries = '; '.join(child_summaries)
+            
+            if len(combined_child_summaries) > max_length:
+                summary_prompt = f"""
+                다음 대화 요약들을 {max_length}자 이내로 요약하라.
+                
+                중요한 지시사항:
+                - 사용자가 한 말, 키워드, 구체적인 용어, 고유명사, 숫자, 날짜 등을 중요도를 따지지 않고 모두 유지하라
+                - 원래 내용의 핵심 의미와 세부사항을 최대한 보존하라
+                - 요약하되 정보 손실을 최소화하라
+                - 사용자의 질문, AI의 답변, 구체적인 사실 관계를 모두 포함하라
+                - 전문 용어와 기술적 세부사항을 우선적으로 유지하라
+                
+                요약할 내용:
+                {combined_child_summaries}
+                """
+                try:
+                    new_summary = await self.ai_manager.call_ai_async_single(summary_prompt, "대화 요약 생성")
+                    if len(new_summary) > max_length:
+                        new_summary = new_summary[:max_length].rstrip() + "..."
+                except Exception as e:
+                    if self.debug:
+                        print(f"[ERROR] 대화 요약 생성 실패: {e}")
+                    new_summary = combined_child_summaries[:max_length].rstrip() + "..."
+            else:
+                new_summary = combined_child_summaries
 
         # 4. 노드 정보 갱신
         self.memory_manager.update_node(node.node_id, topic=new_topic, summary=new_summary)
@@ -185,21 +236,21 @@ class AuxiliaryAI:
                 node_id = await self._add_to_existing_category(conversation, conversation_index, first_category, user_input)
                 return node_id
         
-        # fanout_limit 확인
-        from config import get_config_value
-        fanout_limit = get_config_value('fanout_limit')
-        if len(root_node.children_ids) >= fanout_limit:
-            if self.debug:
-                print(f"fanout 초과 ({len(root_node.children_ids)} >= {fanout_limit}): 트리 정리 트리거")
-            # 트리 정리 실행
-            from .TreeCleanupEngine import TreeCleanupEngine
-            cleanup_engine = TreeCleanupEngine(self.memory_manager, debug=self.debug)
-            await cleanup_engine.run_cleanup()
-        
         # AI를 통한 카테고리명과 요약을 병렬 생성
-        category_name_task = self._generate_category_name(user_input)
-        category_summary_task = self._generate_category_summary(user_input)
-        category_name, category_summary = await asyncio.gather(category_name_task, category_summary_task)
+        if self.topic_updater:
+            # SmartTopicUpdater를 사용한 카테고리명 생성
+            category_name = await self.topic_updater.generate_updated_topic(
+                MemoryNode(topic="새 카테고리", summary=""), [user_input]
+            )
+            if self.debug:
+                print(f"  🎯 SmartTopicUpdater로 카테고리명 생성: '{category_name}'")
+        else:
+            # 기존 방식으로 카테고리명 생성
+            category_name = await self._generate_category_name(user_input)
+            if self.debug:
+                print(f"  📝 기본 방식으로 카테고리명 생성: '{category_name}'")
+        
+        category_summary = await self._generate_category_summary(user_input)
         
         if self.debug:
             print(f"카테고리 생성: '{category_name}'")
@@ -212,7 +263,13 @@ class AuxiliaryAI:
             coordinates={"start": -1, "end": -1}  # 카테고리 표시
         )
         
-        self.memory_manager.add_node(category_node, root_node.node_id)
+        # 카테고리 노드 추가 (fanout_limit 체크 포함)
+        success = self.memory_manager.add_node(category_node, root_node.node_id)
+        if not success:
+            if self.debug:
+                print(f"카테고리 노드 추가 실패 (fanout 초과): 기존 카테고리에 병합 시도")
+            # fanout 초과로 인한 추가 실패 - 기존 카테고리에 병합
+            return await self._handle_fanout_overflow_for_new_category(conversation, conversation_index, user_input)
         
         # 대화 노드 A1 생성
         conversation_topic = await self._generate_conversation_topic(user_input)
@@ -226,7 +283,12 @@ class AuxiliaryAI:
             conversation_indices=[conversation_index]
         )
         
-        self.memory_manager.add_node(conversation_node, category_node.node_id)
+        success = self.memory_manager.add_node(conversation_node, category_node.node_id)
+        if not success:
+            if self.debug:
+                print(f"대화 노드 추가 실패 (fanout 초과): 카테고리 내 병합 시도")
+            # 카테고리 내에서 기존 노드에 병합
+            return await self._merge_to_similar_conversation(conversation, conversation_index, category_node.node_id, user_input)
         
         # 부모 노드 요약 업데이트
         await self.update_parent_summary(category_node)
@@ -244,6 +306,26 @@ class AuxiliaryAI:
         category_node_id = await self._find_category_node_id(category_name)
         category_node = self.memory_manager.get_node(category_node_id)
         
+        # SmartTopicUpdater를 사용한 토픽 업데이트 검사
+        if self.topic_updater:
+            conversation_content = f"사용자: {conversation[0]['content']}\nAI: {conversation[1]['content']}"
+            should_update, similarity_score = await self.topic_updater.should_update_topic(
+                category_node, conversation_content
+            )
+            
+            if should_update:
+                if self.debug:
+                    print(f"  ⚠️  카테고리 '{category_name}' 토픽 업데이트 필요 (유사도: {similarity_score:.3f})")
+                
+                # 토픽과 요약 업데이트 예약 (노드 추가 후 실행)
+                update_needed = True
+            else:
+                if self.debug:
+                    print(f"  ✓  카테고리 '{category_name}' 토픽 적절함 (유사도: {similarity_score:.3f})")
+                update_needed = False
+        else:
+            update_needed = False
+        
         # 깊이 확인
         if not self.memory_manager.can_insert_child(category_node_id, self.max_depth):
             if self.debug:
@@ -251,26 +333,6 @@ class AuxiliaryAI:
             # 가장 유사한 기존 대화 노드에 병합
             node_id = await self._merge_to_similar_conversation(conversation, conversation_index, category_node_id, user_input)
             return node_id
-        
-        # fanout_limit 확인
-        from config import get_config_value
-        fanout_limit = get_config_value('fanout_limit')
-        if len(category_node.children_ids) >= fanout_limit:
-            if self.debug:
-                print(f"fanout 초과 ({len(category_node.children_ids)} >= {fanout_limit}): '{category_name}' 카테고리 정리 트리거")
-            # 트리 정리 실행
-            from .TreeCleanupEngine import TreeCleanupEngine
-            cleanup_engine = TreeCleanupEngine(self.memory_manager, debug=self.debug)
-            await cleanup_engine.run_cleanup()
-            
-            # 정리 후 다시 확인
-            category_node = self.memory_manager.get_node(category_node_id)  # 업데이트된 노드 가져오기
-            if len(category_node.children_ids) >= fanout_limit:
-                if self.debug:
-                    print(f"정리 후에도 fanout 초과: 기존 노드에 병합")
-                # 가장 유사한 기존 대화 노드에 병합
-                node_id = await self._merge_to_similar_conversation(conversation, conversation_index, category_node_id, user_input)
-                return node_id
         
         # 새로운 대화 노드 생성 (A2, A3, ...)
         conversation_topic = await self._generate_conversation_topic(user_input)
@@ -284,10 +346,47 @@ class AuxiliaryAI:
             conversation_indices=[conversation_index]
         )
         
-        self.memory_manager.add_node(conversation_node, category_node_id)
+        # fanout_limit 체크하여 노드 추가
+        success = self.memory_manager.add_node(conversation_node, category_node_id)
+        if not success:
+            if self.debug:
+                print(f"대화 노드 추가 실패 (fanout 초과): 기존 노드에 병합")
+            # fanout 초과로 추가 실패 - 기존 노드에 병합
+            return await self._merge_to_similar_conversation(conversation, conversation_index, category_node_id, user_input)
         
         # 부모 노드 요약 업데이트
         await self.update_parent_summary(category_node)
+        
+        # SmartTopicUpdater로 토픽 업데이트 실행 (필요한 경우)
+        if update_needed and self.topic_updater:
+            if self.debug:
+                print(f"  🔄 카테고리 '{category_name}' 토픽 업데이트 실행 중...")
+            
+            # 업데이트된 카테고리 노드 다시 가져오기
+            updated_category_node = self.memory_manager.get_node(category_node_id)
+            
+            # 자식 노드들의 요약 수집
+            child_summaries = []
+            for child_id in updated_category_node.children_ids:
+                child_node = self.memory_manager.get_node(child_id)
+                if child_node:
+                    child_summaries.append(child_node.summary)
+            
+            # 새로운 토픽 생성
+            new_topic = await self.topic_updater.generate_updated_topic(
+                updated_category_node, child_summaries
+            )
+            
+            # 토픽 업데이트 적용
+            if new_topic != updated_category_node.topic:
+                old_topic = updated_category_node.topic
+                self.memory_manager.update_node(category_node_id, topic=new_topic)
+                
+                if self.debug:
+                    print(f"  ✅ 토픽 업데이트 완료: '{old_topic}' → '{new_topic}'")
+            else:
+                if self.debug:
+                    print(f"  ℹ️  토픽 변경 없음: '{new_topic}'")
         
         if self.debug:
             print(f"대화 노드 추가 완료: '{category_name}'")
@@ -410,7 +509,7 @@ class AuxiliaryAI:
         
         for child_id in root_node.children_ids:
             child_node = self.memory_manager.get_node(child_id)
-            if child_node and child_node.coordinates["start"] == -1:  # 카테고리 노드
+            if child_node and child_node.is_category_node():  # 카테고리 노드
                 categories[child_node.topic] = {
                     'summary': child_node.summary,
                     'node': child_node
@@ -420,12 +519,38 @@ class AuxiliaryAI:
     
     async def _check_category_relevance_async(self, user_input, categories):
         """기존 카테고리들과 사용자 입력의 관련성을 AI로 비동기 병렬 판단합니다."""
-        system_prompt = """사용자의 대화 내용이 특정 카테고리와 관련이 있는지 판단하라.
+        system_prompt = """사용자의 대화 내용이 특정 카테고리와 **극도로 직접적**으로 관련이 있는지 매우 엄격하게 판단하라.
 
-사용자의 대화를 분석하고, 주어진 카테고리와의 관련성을 정확히 판단하라.
-단순히 단어가 포함되어 있다고 관련이 있는 것이 아니라, 실제 대화의 주제와 내용을 고려하라.
+⚠️ 극도로 엄격한 판단 기준:
 
-반드시 "True" (관련 있음) 또는 "False" (관련 없음)로만 답하라."""
+❌ 절대 관련 없음:
+1. 같은 큰 분야(과학, 학문)라는 이유만으로는 관련 없음
+2. 간접적 연관성은 관련 없음  
+3. 추상적 유사성은 관련 없음
+4. 키워드만 일치하는 것은 관련 없음
+5. 같은 학과나 전공 분야라는 이유만으로는 관련 없음
+
+✅ 관련 있음 (모든 조건 만족):
+1. 정확히 동일한 세부 주제이거나
+2. 직접적인 하위/상위 개념이거나  
+3. 실질적으로 같은 맥락에서 다뤄지는 주제
+
+극도로 엄격한 예시:
+- "지구 천체 시스템" + "달의 크기" → True (지구-달 직접 관련)
+- "지구 천체 시스템" + "물의 화학식" → False (천문학 vs 화학, 완전 별개)
+- "지구 천체 시스템" + "태양 광도" → False (지구 천체와 태양은 별개)
+- "분자 화학식" + "광합성 과정" → False (화학식 vs 생물학 과정)
+- "분자 화학식" + "H2O 구조" → True (직접적인 화학식 관련)
+- "태양계 행성" + "목성 특징" → True (행성의 직접적 특성)
+- "태양계 행성" + "달의 위상" → False (행성 vs 위성)
+- "개인 신상정보" + "나이 19살" → True (직접적인 개인정보)
+- "개인 신상정보" + "좋아하는 AI" → False (개인정보 vs 취향/선호도)
+- "AI 기술 선호도" + "Gemini 좋아함" → True (AI 취향 직접 관련)
+- "수열과 패턴" + "피보나치 수열" → True (수열의 직접적 예시)
+
+아무리 작은 차이라도 주제가 다르면 "False"를 출력하라.
+확실하지 않으면 무조건 "False"를 출력하라.
+반드시 "True" 또는 "False"로만 답하라."""
         
         # 각 카테고리별로 개별 쿼리 생성 (병렬 처리용)
         queries = []
@@ -433,11 +558,12 @@ class AuxiliaryAI:
         
         for name, desc in categories.items():
             prompt = f"""카테고리: {name}
-카테고리 설명: {desc}
+카테고리 설명: {desc.get('summary', '') if isinstance(desc, dict) else desc}
 
 사용자 대화: {user_input}
 
-위 대화가 '{name}' 카테고리와 관련이 있습니까?"""
+위 사용자 대화가 '{name}' 카테고리와 **극도로 직접적**으로 관련이 있습니까? 
+(확실하지 않으면 False로 답하세요)"""
             queries.append(prompt)
         
         if self.debug:
@@ -497,7 +623,7 @@ class AuxiliaryAI:
         # 카테고리 노드 찾기
         category_node = None
         for node in self.memory_manager.memory_tree.values():
-            if node.topic == category_name and node.coordinates["start"] == -1:
+            if node.topic == category_name and node.is_category_node():
                 category_node = node
                 break
         
@@ -714,28 +840,22 @@ AI: {ai_content}
         
         return await self.ai_manager.call_ai_async_single(prompt, system_prompt)
     
-    async def update_parent_summary(self, parent_node, child_node=None):
+    async def update_parent_summary(self, parent_node, child_node=None, recursive=True):
         """부모 노드의 요약을 자식 노드 변경사항에 맞춰 업데이트합니다."""
-        # 모든 자식 노드의 요약을 수집
-        child_summaries = []
-        for child_id in parent_node.children_ids:
-            child = self.memory_manager.get_node(child_id)
-            if child and child.summary:
-                child_summaries.append(child.summary)
+        if self.debug:
+            print(f"부모 노드 '{parent_node.topic}' 요약 업데이트 시작")
         
-        if child_summaries:
-            # 자식 요약들을 결합하여 부모 노드 요약 업데이트
-            combined_summary = await self.combine_child_summaries(child_summaries, parent_node.topic)
-            self.memory_manager.update_node(parent_node.node_id, summary=combined_summary)
-            
-            if self.debug:
-                print(f"부모 노드 '{parent_node.topic}' 요약 업데이트 완료")
+        # 고도화된 주제 및 요약 업데이트 메서드 사용
+        await self.update_topic_and_summary(parent_node, recursive=False)
         
-        # 재귀적으로 상위 부모도 업데이트 (ROOT 제외)
-        if parent_node.parent_id and parent_node.topic != "ROOT":
+        if self.debug:
+            print(f"부모 노드 '{parent_node.topic}' 요약 업데이트 완료")
+        
+        # 재귀적으로 상위 부모도 업데이트 (ROOT 제외) - recursive 매개변수로 제어
+        if recursive and parent_node.parent_id and parent_node.topic != "ROOT":
             grandparent_node = self.memory_manager.get_node(parent_node.parent_id)
             if grandparent_node:
-                await self.update_parent_summary(grandparent_node, parent_node)
+                await self.update_parent_summary(grandparent_node, parent_node, recursive=True)
     
     def update_node_coordinates(self, node_id, start_index, end_index):
         """노드의 좌표를 업데이트합니다."""
@@ -778,25 +898,34 @@ AI: {ai_content}
     
     async def _check_category_relevance(self, user_input, category_name, category_summary):
         """특정 카테고리와 사용자 입력의 관련성을 판단합니다."""
-        system_prompt = """사용자의 입력이 주어진 카테고리와 구체적으로 관련이 있는지 엄격하게 판단하라.
+        system_prompt = """사용자의 입력이 주어진 카테고리와 매우 구체적으로 직접 관련이 있는지 극도로 엄격하게 판단하라.
 
-판단 기준:
-1. 주제가 정확히 일치하거나 매우 밀접한 하위 주제인가?
-2. 단순히 같은 분야(예: 과학)라는 이유만으로는 관련이 없다고 판단한다.
-3. 구체적인 주제의 연관성이 있어야 한다.
+❌ 절대 관련 없음 기준:
+1. 같은 큰 분야(과학, 학문 등)라는 이유만으로는 관련 없음
+2. 간접적 연관성으로는 관련 없음  
+3. 추상적 유사성으로는 관련 없음
 
-예시:
-- "지구 위성" 카테고리에 "달의 뒷면" 질문 → True (밀접한 관련)
-- "지구 위성" 카테고리에 "물의 화학식" 질문 → False (과학이지만 별개 주제)
-- "지구 위성" 카테고리에 "태양계 행성" 질문 → False (천문학이지만 위성과 직접 관련 없음)
+✅ 관련 있음 기준 (모두 만족해야 함):
+1. 정확히 동일한 세부 주제이거나
+2. 직접적인 하위/상위 개념이거나  
+3. 실질적으로 같은 맥락에서 다뤄지는 주제
 
+극도로 엄격한 예시:
+- "지구 위성" 카테고리 + "달의 크기" → True (직접 관련)
+- "지구 위성" 카테고리 + "물의 화학식" → False (과학이지만 완전 별개)
+- "지구 위성" 카테고리 + "태양 광도" → False (천문학이지만 위성과 무관)
+- "화학 개념" 카테고리 + "전자기파" → False (물리학, 화학과 별개)
+- "화학 개념" 카테고리 + "광합성" → False (생물학, 화학과 별개)
+- "화학 개념" 카테고리 + "물의 끓는점" → True (물리화학적 성질)
+
+매우 엄격하게 판단하고, 확실하지 않으면 무조건 False를 출력하라.
 관련이 있으면 "True", 없으면 "False"로만 답하라."""
         
         query = f"""사용자 입력: {user_input}
 카테고리 이름: {category_name}
 카테고리 요약: {category_summary}
 
-위 사용자 입력이 해당 카테고리와 구체적으로 관련이 있는가?"""
+위 사용자 입력이 해당 카테고리와 직접적으로 관련이 있는가? (확실하지 않으면 False)"""
         
         try:
             result = await self.ai_manager.call_ai_async_single(query, system_prompt)
@@ -808,45 +937,74 @@ AI: {ai_content}
     
     async def _generate_category_name(self, user_input):
         """사용자 입력을 기반으로 카테고리명을 생성합니다."""
-        system_prompt = """사용자 입력을 분석하여 구체적이고 명확한 카테고리명을 생성하라.
+        system_prompt = """사용자 입력을 분석하여 **매우 구체적이고 세부적인** 카테고리명을 생성하라.
+
+❌ 피해야 할 포괄적 용어들:
+- "과학", "학문", "지식", "공부", "기초"
+- "화학 개념", "물리 개념", "생물 개념" (너무 포괄적)
+- "천문학", "수학" (너무 광범위)
+- "위성", "개념" (너무 일반적)
+
+✅ 선호하는 구체적 표현:
+- "지구 천체 시스템" (지구와 달에 관한 내용)
+- "분자 화학식" (화학식 관련)
+- "태양계 행성" (행성 관련)
+- "식물 광합성" (광합성 관련)
+- "기하학 정리" (수학 정리 관련)
+- "개인 신상정보" (개인 정보 관련)
+- "수열과 패턴" (피보나치 등 수열 관련)
+- "AI 기술 선호도" (AI 관련 취향)
 
 원칙:
 - 2-8자의 간결한 한국어로 작성
-- 너무 포괄적이지 않고 구체적인 주제 표현
-- 단순히 "과학", "학문" 같은 광범위한 용어 지양
-- 구체적인 세부 분야명 선호
+- 가능한 한 가장 구체적인 세부 주제명 사용
+- 입력에서 핵심 키워드를 추출하여 구체화
+- 다른 주제와 명확히 구분되는 세부 분야명
+- 동일한 카테고리명이 반복되지 않도록 주의
 
 예시:
-- "지구의 위성은?" → "천체 물리" 또는 "지구 위성"
-- "물의 화학식은?" → "화학 기초" 또는 "분자 구조"  
-- "피타고라스 정리는?" → "기하학" 또는 "수학 정리"
-- "내 나이는 19살" → "개인 정보" 또는 "자기소개"
+- "지구의 위성은?" → "지구 천체 시스템" 
+- "물의 화학식은?" → "분자 화학식"
+- "태양계 가장 큰 행성?" → "태양계 행성"
+- "광합성에 필요한 빛?" → "식물 광합성"
+- "피타고라스 정리?" → "기하학 정리"
+- "내 나이는 19살" → "개인 신상정보"
+- "피보나치 수열" → "수열과 패턴"
+- "좋아하는 AI는 Gemini" → "AI 기술 선호도"
 
-오직 카테고리명만 답변하라."""
+오직 구체적인 카테고리명만 답변하라."""
         
         try:
             result = await self.ai_manager.call_ai_async_single(user_input, system_prompt)
             category_name = result.strip()[:20]  # 최대 20자 제한
             
-            # 너무 포괄적인 이름들을 더 구체적으로 변경
-            if category_name in ["과학", "학문", "지식", "공부"]:
-                # 입력에서 키워드 추출하여 더 구체적으로 만들기
-                if "물" in user_input or "화학" in user_input:
-                    category_name = "화학 기초"
-                elif "지구" in user_input or "달" in user_input or "태양" in user_input:
-                    category_name = "천문학"
-                elif "수학" in user_input or "정리" in user_input:
-                    category_name = "수학"
-                elif "빛" in user_input or "광합성" in user_input:
-                    category_name = "생물학"
-                else:
-                    category_name = "과학 기초"
+            # 키워드 기반 구체화 (포괄적인 이름들을 더 구체적으로 변경)
+            if any(word in user_input for word in ["지구", "달", "위성"]):
+                category_name = "지구 천체 시스템"
+            elif any(word in user_input for word in ["물", "H2O", "화학식", "분자"]):
+                category_name = "분자 화학식"
+            elif any(word in user_input for word in ["태양계", "행성", "목성", "화성"]):
+                category_name = "태양계 행성"
+            elif any(word in user_input for word in ["광합성", "식물", "엽록소", "빛"]):
+                category_name = "식물 광합성"
+            elif any(word in user_input for word in ["피타고라스", "정리", "삼각형", "기하"]):
+                category_name = "기하학 정리"
+            elif any(word in user_input for word in ["나이", "살", "이름", "소개"]):
+                category_name = "개인 신상정보"
+            elif any(word in user_input for word in ["피보나치", "수열", "패턴", "순서"]):
+                category_name = "수열과 패턴"
+            elif any(word in user_input for word in ["AI", "인공지능", "Gemini", "GPT"]):
+                category_name = "AI 기술 선호도"
+            elif any(word in user_input for word in ["온도", "체온", "끓는점", "열"]):
+                category_name = "온도와 열현상"
+            elif any(word in user_input for word in ["원소", "원자", "주기율표"]):
+                category_name = "원소 주기율표"
             
             return category_name
         except Exception as e:
             if self.debug:
                 print(f">>>> [ERROR] 카테고리명 생성 오류: {e}")
-            return "기타"
+            return "기타 주제"
     
     async def _generate_category_summary(self, user_input):
         """사용자 입력을 기반으로 카테고리 요약을 생성합니다."""
@@ -970,7 +1128,7 @@ AI: {ai_content}
 
         for node in candidate_nodes:
             # 리프 노드(대화가 있는 노드)만 처리
-            if hasattr(node, 'conversation_indices') and node.conversation_indices:
+            if node.conversation_indices:
                 for conv_idx in node.conversation_indices:
                     if conv_idx not in processed_indices:
                         all_conversations.append({
@@ -1080,7 +1238,7 @@ AI: {ai_content}
                         if child_node:
                             queue.append((child_id, current_depth + 1))
                 # 자식 노드가 없는 리프 노드일 경우에만 대화 수집
-                elif hasattr(node, 'conversation_indices') and node.conversation_indices:
+                elif node.conversation_indices:
                     if self.debug:
                         print(f"리프 노드: {len(node.conversation_indices)}개 대화")
                     for conv_idx in node.conversation_indices:
@@ -1201,9 +1359,11 @@ AI: {ai_content}
         if not category_node:
             return None
         
-        # 새로운 대화 노드 생성 (임시)
-        temp_topic = await self._generate_conversation_topic(user_input)
-        temp_summary = await self._generate_conversation_summary(conversation)
+        # 새로운 대화 노드 생성 (주제와 요약을 병렬로 생성)
+        topic_task = self._generate_conversation_topic(user_input)
+        summary_task = self._generate_conversation_summary(conversation)
+        
+        temp_topic, temp_summary = await asyncio.gather(topic_task, summary_task)
         
         temp_node = MemoryNode(
             topic=temp_topic,
@@ -1213,15 +1373,19 @@ AI: {ai_content}
             conversation_indices=[conversation_index]
         )
         
-        # K-거리 이내 노드들과의 유사도 비교
+        # K-거리 이내 노드들과의 유사도 비교 (전체 트리에서)
         similar_nodes = await self.k_distance_search.find_similar_nodes(temp_node)
         
-        # 가장 유사한 노드 찾기 (유사도 0.7 이상)
+        # 가장 유사한 대화 노드 찾기 (유사도 0.75 이상)
         best_match = None
         best_similarity = 0.0
         
         for node, similarity in similar_nodes:
-            if similarity >= 0.7 and node.parent_id == category_node_id:  # 같은 카테고리 내에서만
+            # 대화 노드만 대상으로 하고 (카테고리 노드 제외), 충분히 유사한 경우만
+            if (similarity >= 0.75 and 
+                hasattr(node, 'conversation_indices') and 
+                node.conversation_indices and
+                len(node.conversation_indices) > 0):
                 if similarity > best_similarity:
                     best_similarity = similarity
                     best_match = node
@@ -1231,24 +1395,132 @@ AI: {ai_content}
             if self.debug:
                 print(f"K-거리 검색으로 유사 노드 발견: '{best_match.topic}' (유사도: {best_similarity:.2f})")
             
-            # 대화 노드에만 conversation_indices 추가
-            if best_match.coordinates["start"] != -1:  # 대화 노드인 경우만
-                best_match.conversation_indices.append(conversation_index)
+            # 대화 인덱스 추가
+            best_match.conversation_indices.append(conversation_index)
             
+            # 요약 업데이트 (병합된 대화 반영)
+            await self.update_node_summary_with_ai(best_match.node_id, conversation_index)
+            
+            # 부모 노드들 요약 업데이트 (저장 포함)
+            await self.update_parent_nodes_simple(best_match.node_id)
+            
+            # 최종 저장 (모든 업데이트 완료 후)
             await self._safe_save_tree()
-            # 부모 노드 요약 업데이트
-            await self.update_parent_summary(category_node)
+            
             return best_match.node_id
         
-        # 유사한 노드가 없으면 새로운 노드 생성
+        # 유사한 노드가 없으면 카테고리 내에서 가장 유사한 노드 찾기
         if self.debug:
-            print("K-거리 검색으로 유사 노드 없음, 새 노드 생성")
+            print("K-거리 검색으로 유사 노드 없음, 카테고리 내에서 가장 유사한 노드 검색")
         
-        self.memory_manager.add_node(temp_node, category_node_id)
-        # 부모 노드 요약 업데이트
-        await self.update_parent_summary(category_node)
-        return temp_node.node_id
+        # fanout_limit로 인해 새 노드 생성이 불가능하므로 기존 노드 중 가장 유사한 노드에 병합
+        category_node = self.memory_manager.get_node(category_node_id)
+        if category_node and category_node.children_ids:
+            # 모든 자식 노드와의 유사도 계산 (병렬 처리)
+            valid_children = []
+            similarity_tasks = []
+            
+            for child_id in category_node.children_ids:
+                child_node = self.memory_manager.get_node(child_id)
+                if child_node and hasattr(child_node, 'conversation_indices') and child_node.conversation_indices:
+                    valid_children.append(child_node)
+                    # 병렬 처리를 위한 태스크 생성
+                    similarity_tasks.append(self._calculate_topic_similarity(temp_topic, child_node.topic))
+            
+            if valid_children and similarity_tasks:
+                # 병렬로 유사도 계산 실행
+                similarities = await asyncio.gather(*similarity_tasks)
+                
+                # 가장 높은 유사도 찾기
+                best_child = None
+                best_similarity = 0.0
+                
+                for child_node, similarity in zip(valid_children, similarities):
+                    if similarity > best_similarity:
+                        best_similarity = similarity
+                        best_child = child_node
+            
+            if best_child:
+                # 가장 유사한 노드에 병합
+                best_child.conversation_indices.append(conversation_index)
+                
+                # 노드의 주제와 요약을 새 대화를 포함하여 업데이트
+                await self._update_node_with_new_conversation(best_child.node_id, conversation, temp_topic, conversation_index)
+                
+                # 부모 노드들 요약 업데이트 (저장 포함)
+                await self.update_parent_nodes_simple(best_child.node_id)
+                
+                # 최종 저장 (모든 업데이트 완료 후)
+                await self._safe_save_tree()
+                
+                if self.debug:
+                    print(f"유사도 기반 병합 완료: '{best_child.topic}' 노드에 병합 (유사도: {best_similarity:.2f})")
+                
+                return best_child.node_id
+        
+        # 극단적인 경우 - 아무것도 할 수 없는 상황
+        if self.debug:
+            print("경고: 병합할 수 있는 노드가 없음")
+        return None
     
+    async def _calculate_topic_similarity(self, topic1, topic2):
+        """두 주제 간의 유사도를 0.0~1.0 범위로 계산합니다."""
+        system_prompt = """두 주제 간의 유사도를 0.0부터 1.0 사이의 숫자로 평가하세요.
+
+평가 기준:
+- 1.0: 완전히 동일한 주제
+- 0.8-0.9: 매우 유사한 주제 (같은 세부 분야)
+- 0.6-0.7: 어느 정도 유사한 주제 (같은 일반 분야)
+- 0.4-0.5: 약간 관련 있는 주제
+- 0.0-0.3: 거의 관련 없는 주제
+
+숫자만 답하세요 (예: 0.7)"""
+        
+        prompt = f"""주제 1: "{topic1}"
+주제 2: "{topic2}"
+
+이 두 주제의 유사도는?"""
+        
+        try:
+            result = await self.ai_manager.call_ai_async_single(prompt, system_prompt)
+            similarity = float(result.strip())
+            return max(0.0, min(1.0, similarity))  # 0.0~1.0 범위로 제한
+        except Exception as e:
+            if self.debug:
+                print(f">>>> [ERROR] AI 주제 유사도 계산 오류: {e}")
+            return 0.0
+    
+    async def _update_node_with_new_conversation(self, node_id, conversation, new_topic, conversation_index):
+        """노드에 새 대화가 추가될 때 주제와 요약을 업데이트합니다."""
+        node = self.memory_manager.get_node(node_id)
+        if not node:
+            return
+        
+        # 기존 주제와 새 주제를 결합한 통합 주제 생성
+        system_prompt = """기존 노드 주제와 새로 추가될 대화의 주제를 고려하여, 
+두 내용을 모두 포괄하는 통합된 주제를 생성하세요. 
+간결하고 명확하게 작성하세요."""
+        
+        prompt = f"""기존 노드 주제: "{node.topic}"
+새 대화 주제: "{new_topic}"
+
+두 내용을 포괄하는 통합 주제:"""
+        
+        try:
+            # 통합 주제 생성
+            new_unified_topic = await self.ai_manager.call_ai_async_single(prompt, system_prompt)
+            node.topic = new_unified_topic.strip()
+            
+            # 새 대화를 포함한 요약 업데이트
+            await self.update_node_summary_with_ai(node_id, conversation_index)
+            
+            if self.debug:
+                print(f"노드 주제 업데이트: '{node.topic}'")
+                
+        except Exception as e:
+            if self.debug:
+                print(f">>>> [ERROR] 노드 주제/요약 업데이트 오류: {e}")
+
     async def _is_similar_topic_ai(self, user_input, existing_topic):
         """AI를 사용하여 두 주제가 유사한지 판단합니다."""
         system_prompt = """사용자 입력과 기존 주제가 같은 범주나 유사한 내용을 다루는지 판단하세요.
@@ -1330,8 +1602,7 @@ AI: {ai_content}
             
             if most_similar_leaf:
                 # 기존 리프에 대화 인덱스 추가 (병합)
-                if not hasattr(most_similar_leaf, 'conversation_indices'):
-                    most_similar_leaf.conversation_indices = []
+                # conversation_indices는 항상 존재함 (기본값 보장)
                 
                 # 대화 노드에만 conversation_indices 추가
                 if most_similar_leaf.coordinates["start"] != -1:  # 대화 노드인 경우만
@@ -1507,110 +1778,177 @@ AI: {new_ai_content}"""
 
     async def update_parent_nodes_simple(self, start_node_id: str):
         """
-        부모 노드들을 자식 노드들의 요약을 결합하는 방식으로 업데이트합니다.
-        AI 호출 없이 간단한 텍스트 결합으로 처리합니다.
+        부모 노드들을 자식 노드들의 요약을 결합하는 방식으로 병렬 업데이트합니다.
+        AI 요약이 필요한 노드들은 모아서 병렬 처리합니다.
         """
+        # 업데이트해야 할 모든 부모 노드들을 수집
+        parent_nodes_to_update = []
         current_node = self.memory_manager.get_node(start_node_id)
-
-        while current_node and current_node.node_id != "ROOT":
-            # 현재 노드의 자식 노드들의 요약을 결합
-            child_summaries = []
-            for child_id in current_node.children_ids:
-                child_node = self.memory_manager.get_node(child_id)
-                if child_node and child_node.summary:
-                    child_summaries.append(child_node.summary)
-
-            if child_summaries:
-                # 자식 요약들을 결합하여 부모 노드 요약 업데이트
-                combined_summary = await self.combine_child_summaries(child_summaries, current_node.topic)
-                
-                # 노드 업데이트를 통해 변경사항을 메모리 매니저에 저장
-                self.memory_manager.update_node(current_node.node_id, summary=combined_summary)
-
-                if self.debug:
-                    print(f"부모 노드 '{current_node.topic}' 요약 업데이트 완료")
-
-            # 부모 노드로 이동
-            if current_node.parent_id:
-                current_node = self.memory_manager.get_node(current_node.parent_id)
+        
+        # 부모로 올라가면서 모든 업데이트 대상 노드 수집
+        while current_node and current_node.parent_id and current_node.parent_id != "ROOT":
+            parent_node = self.memory_manager.get_node(current_node.parent_id)
+            if parent_node:
+                parent_nodes_to_update.append(parent_node)
+                current_node = parent_node
             else:
                 break
+        
+        if not parent_nodes_to_update:
+            return
+        
+        # 1단계: 모든 부모 노드의 기본 요약 생성 (텍스트 결합)
+        nodes_needing_ai_summary = []
+        for parent_node in parent_nodes_to_update:
+            combined_summary = await self._combine_child_summaries_simple(parent_node)
+            
+            # AI 요약이 필요한지 확인
+            from config import get_config_value
+            max_length = get_config_value('max_summary_length')
+            
+            if len(combined_summary) > max_length:
+                nodes_needing_ai_summary.append((parent_node, combined_summary))
+            else:
+                # AI 요약이 필요없으면 바로 업데이트
+                self.memory_manager.update_node(parent_node.node_id, summary=combined_summary)
+                if self.debug:
+                    print(f"부모 노드 '{parent_node.topic}' 요약 업데이트 완료")
+        
+        # 2단계: AI 요약이 필요한 노드들 병렬 처리
+        if nodes_needing_ai_summary:
+            ai_tasks = []
+            for parent_node, long_summary in nodes_needing_ai_summary:
+                ai_tasks.append(self._generate_ai_summary_for_parent(parent_node, long_summary))
+            
+            # 모든 AI 요약을 병렬로 처리
+            ai_results = await asyncio.gather(*ai_tasks, return_exceptions=True)
+            
+            # 결과 적용
+            for (parent_node, _), ai_summary in zip(nodes_needing_ai_summary, ai_results):
+                if isinstance(ai_summary, Exception):
+                    if self.debug:
+                        print(f"AI 요약 실패, 원본 요약 사용: {ai_summary}")
+                    # 실패시 길이 제한 적용
+                    from config import get_config_value
+                    max_length = get_config_value('max_summary_length')
+                    summary = long_summary[:max_length] + "..." if len(long_summary) > max_length else long_summary
+                else:
+                    summary = ai_summary.strip()
+                
+                self.memory_manager.update_node(parent_node.node_id, summary=summary)
+                if self.debug:
+                    print(f"부모 노드 '{parent_node.topic}' 요약 업데이트 완료")
+        
+        if self.debug:
+            print(f">> {len(parent_nodes_to_update)}개 부모 노드 병렬 업데이트 완료")
+    
+    async def _combine_child_summaries_simple(self, parent_node):
+        """자식 노드들의 요약을 간단히 결합합니다 (AI 호출 없음)."""
+        child_summaries = []
+        for child_id in parent_node.children_ids:
+            child_node = self.memory_manager.get_node(child_id)
+            if child_node and child_node.summary:
+                child_summaries.append(child_node.summary)
 
-    async def combine_child_summaries(self, child_summaries: list, parent_topic: str) -> str:
-        """
-        자식 노드들의 요약을 결합하여 부모 노드의 요약을 생성합니다.
-        모든 자식 노드의 요약을 그대로 결합하여 최대한 자세한 요약을 생성합니다.
-        결합된 요약이 너무 길면 AI를 사용하여 요약합니다.
-        """
         if not child_summaries:
-            return f"{parent_topic}에 대한 내용들입니다."
+            return f"{parent_node.topic}에 대한 내용들입니다."
 
         # 모든 자식 요약을 그대로 결합
         valid_summaries = [summary.strip() for summary in child_summaries if summary.strip()]
 
         if not valid_summaries:
-            return f"{parent_topic}에 대한 내용들입니다."
+            return f"{parent_node.topic}에 대한 내용들입니다."
 
         # 결합된 요약 생성 - 모든 요약을 포함
         if len(valid_summaries) == 1:
-            combined = valid_summaries[0]
+            return valid_summaries[0]
         elif len(valid_summaries) == 2:
-            combined = f"{valid_summaries[0]} 및 {valid_summaries[1]}"
+            return f"{valid_summaries[0]} 및 {valid_summaries[1]}"
         else:
             # 모든 요약을 순서대로 결합
-            combined = " · ".join(valid_summaries)
-
-        # 결합된 요약의 길이 확인 및 AI 요약 적용
+            return " · ".join(valid_summaries)
+    
+    async def _generate_ai_summary_for_parent(self, parent_node, long_summary):
+        """부모 노드를 위한 AI 요약을 생성합니다."""
         from config import get_config_value
         max_length = get_config_value('max_summary_length')
+        
+        if self.debug:
+            print(f"📝 [요약 시작] 부모 노드 요약이 {len(long_summary)}자 > {max_length}자 제한을 초과하여 AI 요약을 시작합니다...")
+        
+        ai_summary_prompt = f"""
+        다음은 '{parent_node.topic}'에 대한 여러 자식 노드들의 요약을 결합한 내용입니다:
 
-        if len(combined) > max_length:
-            print(f"📝 [요약 시작] 부모 노드 요약이 {len(combined)}자 > {max_length}자 제한을 초과하여 AI 요약을 시작합니다...")
+        {long_summary}
 
-            # AI를 사용하여 긴 요약을 압축
-            ai_summary_prompt = f"""
-            다음은 '{parent_topic}'에 대한 여러 자식 노드들의 요약을 결합한 내용입니다:
+        이 내용을 바탕으로 '{parent_node.topic}'의 전체 내용을 잘 대표하는 간결한 요약을 {max_length}자 이내로 작성해주세요.
+        
+        중요한 지시사항:
+        - 사용자가 한 말, 키워드, 구체적인 용어, 고유명사, 숫자, 날짜 등을 중요도를 따지지 않고 모두 유지하라
+        - 원래 내용의 핵심 의미와 세부사항을 최대한 보존하라
+        - 요약하되 정보 손실을 최소화하라
+        - 사용자의 질문, AI의 답변, 구체적인 사실 관계를 모두 포함하라
+        - 전문 용어와 기술적 세부사항을 우선적으로 유지하라
+        - 중요한 세부사항을 유지하면서도 불필요한 부분을 제거하여 핵심 내용만 포함하라
+        """
 
-            {combined}
-
-            이 내용을 바탕으로 '{parent_topic}'의 전체 내용을 잘 대표하는 간결한 요약을 {max_length}자 이내로 작성해주세요.
-            
-            중요한 지시사항:
-            - 사용자가 한 말, 키워드, 구체적인 용어, 고유명사, 숫자, 날짜 등을 중요도를 따지지 않고 모두 유지하라
-            - 원래 내용의 핵심 의미와 세부사항을 최대한 보존하라
-            - 요약하되 정보 손실을 최소화하라
-            - 사용자의 질문, AI의 답변, 구체적인 사실 관계를 모두 포함하라
-            - 전문 용어와 기술적 세부사항을 우선적으로 유지하라
-            - 중요한 세부사항을 유지하면서도 불필요한 부분을 제거하여 핵심 내용만 포함하라
-            """
-
-            try:
-                ai_summarized = await self.ai_manager.call_ai_async_single(ai_summary_prompt, "부모 노드 요약 생성")
-                combined = ai_summarized.strip()
-                print(f"✅ [요약 완료] 부모 노드 요약이 {len(combined)}자로 요약되었습니다.")
-
-                if self.debug:
-                    print(f"AI 요약 완료 (길이: {len(combined)})")
-
-            except Exception as e:
-                if self.debug:
-                    print(f"AI 요약 실패, 원본 요약 사용: {e}")
-                # AI 요약 실패시 원본 사용하되 길이 제한 적용
-                combined = combined[:max_length] + "..." if len(combined) > max_length else combined
-
-        return combined
+        ai_summarized = await self.ai_manager.call_ai_async_single(ai_summary_prompt, "부모 노드 요약 생성")
+        
+        if self.debug:
+            print(f"✅ [요약 완료] 부모 노드 요약이 {len(ai_summarized.strip())}자로 요약되었습니다.")
+        
+        return ai_summarized
 
     async def update_node_chain_after_save(self, saved_node_id: str, conversation_index: int):
         """
         대화 저장 후 노드 체인을 업데이트합니다.
         1. 저장된 노드의 요약을 AI로 업데이트
-        2. 부모 노드들을 간단한 결합 방식으로 업데이트
+        2. 부모 노드들을 간단한 결합 방식으로 병렬 업데이트
         """
         # 1. 저장된 노드의 요약을 AI로 업데이트
         await self.update_node_summary_with_ai(saved_node_id, conversation_index)
 
-        # 2. 부모 노드들을 간단한 결합 방식으로 업데이트
+        # 2. 부모 노드들을 병렬로 업데이트
         await self.update_parent_nodes_simple(saved_node_id)
 
-        # 3. 트리 저장
-        self.memory_manager.save_tree()
+        # 3. 트리 저장 (비동기)
+        await self._safe_save_tree()
+
+    async def _handle_fanout_overflow_for_new_category(self, conversation, conversation_index, user_input):
+        """fanout 초과로 인해 새 카테고리를 생성할 수 없을 때 기존 카테고리에 병합합니다."""
+        if self.debug:
+            print(f"fanout 초과: 새 카테고리 대신 가장 적합한 기존 카테고리에 추가")
+        
+        # 기존 카테고리들과의 관련성 재평가
+        existing_categories = await self._get_existing_categories()
+        if not existing_categories:
+            # 기존 카테고리가 없는 경우 (이론상 불가능하지만)
+            if self.debug:
+                print("기존 카테고리 없음 - 에러 상황")
+            return None
+        
+        # 가장 관련성이 높은 기존 카테고리 찾기
+        category_summaries = {name: info['summary'] for name, info in existing_categories.items()}
+        category_relevance = await self._check_category_relevance_async(user_input, category_summaries)
+        
+        # category_relevance는 {category_name: boolean} 딕셔너리
+        # 가장 적합한 카테고리 선택
+        best_category = None
+        
+        # 관련성이 있는 카테고리 중에서 첫 번째 선택
+        for category_name, is_relevant in category_relevance.items():
+            if is_relevant:
+                best_category = category_name
+                break
+        
+        # 관련성이 있는 카테고리가 없다면 첫 번째 카테고리 선택
+        if not best_category:
+            best_category = list(existing_categories.keys())[0]
+            if self.debug:
+                print(f"관련성 없음 - 첫 번째 카테고리 '{best_category}'에 강제 추가")
+        else:
+            if self.debug:
+                print(f"관련성 있는 카테고리 '{best_category}' 선택")
+        
+        # 선택된 카테고리에 추가
+        return await self._add_to_existing_category(conversation, conversation_index, best_category, user_input)

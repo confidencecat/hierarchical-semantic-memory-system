@@ -8,10 +8,18 @@ from .AIManager import AIManager
 class MainAI:
     """메인 인공지능 - 사용자와 직접 대화하는 주체"""
     
-    def __init__(self, force_search=False, force_record=False, debug=False, max_depth=4, top_search_n=0, no_record=False, no_search=False):
+    def __init__(self, force_search=False, force_record=False, debug=False, max_depth=4, top_search_n=0, no_record=False, no_search=False, update_topic='smart', topic_threshold=0.7, flexible_depth=False):
         self.debug = debug
         self.memory_manager = MemoryManager(debug=self.debug)
-        self.auxiliary_ai = AuxiliaryAI(self.memory_manager, debug=self.debug, max_depth=max_depth, top_search_n=top_search_n)
+        self.auxiliary_ai = AuxiliaryAI(
+            self.memory_manager, 
+            debug=self.debug, 
+            max_depth=max_depth, 
+            top_search_n=top_search_n,
+            update_topic=update_topic,
+            topic_threshold=topic_threshold,
+            flexible_depth=flexible_depth
+        )
         self.ai_manager = AIManager(debug=self.debug)
         
         self.force_search = force_search
@@ -20,6 +28,9 @@ class MainAI:
         self.no_search = no_search
         self.max_depth = max_depth
         self.top_search_n = top_search_n
+        self.update_topic = update_topic
+        self.topic_threshold = topic_threshold
+        self.flexible_depth = flexible_depth
         
         if self.force_search and self.force_record:
             raise ValueError("--force-search와 --force-record는 동시에 사용할 수 없습니다.")

@@ -20,6 +20,7 @@ from .AIManager import AIManager
 from .AuxiliaryAI import AuxiliaryAI
 from .MainAI import MainAI
 from .TreeCleanupEngine import TreeCleanupEngine
+from .SmartTopicUpdater import SmartTopicUpdater
 
 __all__ = [
     'DataManager',
@@ -28,7 +29,8 @@ __all__ = [
     'AIManager',
     'AuxiliaryAI',
     'MainAI',
-    'TreeCleanupEngine'
+    'TreeCleanupEngine',
+    'SmartTopicUpdater'
 ]
 
 # 패키지 정보
