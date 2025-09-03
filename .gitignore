@@ -1,2 +1,5 @@
 .env
 memory/*.json
+.json
+.json.backup
+docs/

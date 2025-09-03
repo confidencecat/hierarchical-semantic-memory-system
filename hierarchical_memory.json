@@ -1,0 +1,302 @@
+{
+  "8a14f28c-f661-4fec-b7ff-199eb9515ae4": {
+    "node_id": "8a14f28c-f661-4fec-b7ff-199eb9515ae4",
+    "topic": "지구 위성 달",
+    "summary": "지구의 위성은 달이다.",
+    "direct_parent_id": null,
+    "all_parent_ids": [],
+    "children_ids": [],
+    "all_memory_indexes": [
+      0
+    ]
+  },
+  "61350f69-48ba-45c9-b5d4-5fae0d76b4a9": {
+    "node_id": "61350f69-48ba-45c9-b5d4-5fae0d76b4a9",
+    "topic": "물의 화학식",
+    "summary": "사용자가 물의 화학식을 질문했고, 어시스턴트는 H2O라고 답변했다.\n수소 원자의 원자번호는 1이다.\n물은 섭씨 100도(°C) 또는 화씨 212도(°F)에서 끓는다.\n원소기호 O는 산소를 의미한다.\n지구의 대기는 주로 **질소(약 78%)**와 **산소(약 21%)**로 구성되어 있다.",
+    "direct_parent_id": "27dc2c09-a3f6-41db-9b46-a37cbdfd4674",
+    "all_parent_ids": [
+      "7f03e629-d520-478f-8de8-3bd3934a5944",
+      "27dc2c09-a3f6-41db-9b46-a37cbdfd4674"
+    ],
+    "children_ids": [
+      "1676dc62-6fbd-4b68-ab41-1e2bea5ec095",
+      "fb8845cf-e0fa-4756-8b43-ceac636ea66d"
+    ],
+    "all_memory_indexes": [
+      1,
+      9
+    ]
+  },
+  "fbaec125-f332-4cb9-abfc-5143a303efc8": {
+    "node_id": "fbaec125-f332-4cb9-abfc-5143a303efc8",
+    "topic": "행성 크기 정보",
+    "summary": "사용자가 태양계에서 가장 큰 행성이 무엇인지 묻자, 조수는 '목성'이라고 답했다.\n에베레스트산의 높이는 약 8,848.86 미터이다.\n지구의 자전주기가 약 24시간이라는 질문과 답변 내용입니다.\n달의 뒷면을 처음 본 인류는 1968년 아폴로 8호 미션의 우주비행사 프랭크 보먼, 짐 러벨, 윌리엄 앤더스이다.",
+    "direct_parent_id": "27dc2c09-a3f6-41db-9b46-a37cbdfd4674",
+    "all_parent_ids": [
+      "7f03e629-d520-478f-8de8-3bd3934a5944",
+      "27dc2c09-a3f6-41db-9b46-a37cbdfd4674"
+    ],
+    "children_ids": [
+      "cd607239-07d4-467c-905d-cf0c04b11e27",
+      "06814000-3563-4a8d-86bb-0e9046de9a07",
+      "95f031d8-f2d3-4cd3-a70b-97b3937eef37"
+    ],
+    "all_memory_indexes": [
+      2
+    ]
+  },
+  "ac3e4c84-2f41-4098-8134-404389ed8df0": {
+    "node_id": "ac3e4c84-2f41-4098-8134-404389ed8df0",
+    "topic": "광합성 빛 요구",
+    "summary": "광합성에는 주로 파란색과 빨간색 빛이 필요하다.",
+    "direct_parent_id": null,
+    "all_parent_ids": [],
+    "children_ids": [],
+    "all_memory_indexes": [
+      3
+    ]
+  },
+  "30020558-a2e5-48ff-8a76-3c2b43beb8f3": {
+    "node_id": "30020558-a2e5-48ff-8a76-3c2b43beb8f3",
+    "topic": "피타고라스 정리",
+    "summary": "피타고라스의 정리는 직각삼각형에서 빗변 길이의 제곱이 다른 두 변 길이의 제곱의 합과 같다는 것입니다. 공식은 a² + b² = c²이며, 여기서 'a'와 'b'는 직각을 이루는 두 변의 길이이고 'c'는 빗변의 길이입니다.",
+    "direct_parent_id": null,
+    "all_parent_ids": [],
+    "children_ids": [],
+    "all_memory_indexes": [
+      4
+    ]
+  },
+  "7f03e629-d520-478f-8de8-3bd3934a5944": {
+    "node_id": "7f03e629-d520-478f-8de8-3bd3934a5944",
+    "topic": "사용자 상호작용 및 정보 교환",
+    "summary": "김철수 사용자가 자신의 이름을 밝힌 후, 물의 화학식(H2O)과 태양계에서 가장 큰 행성(목성)을 질문했고, 어시스턴트가 모두 정확히 답변했다.\nDNA 이중나선 구조를 발견한 과학자는 왓슨과 크릭이다.\n빛의 속도는 초속 299,792,458미터이다.\n뉴턴의 제1법칙은 '관성의 법칙'이라고도 불리며, 외부에서 힘이 가해지지 않는 한 정지한 물체는 계속 정지하고, 움직이는 물체는 같은 속도와 방향으로 계속 움직이려 한다는 내용이다.\n수소 원자의 원자번호는 1이다.\n에베레스트산의 높이는 약 8,848.86 미터이다.\n지구의 자전주기가 약 24시간이라는 질문과 답변 내용입니다.\n물은 섭씨 100도(°C) 또는 화씨 212도(°F)에서 끓는다.\n원소기호 O는 산소를 의미한다.\n사용자가 전자기파의 예를 요청했고, 조수는 '라디오파'라고 답변했다.\n지구의 대기는 주로 **질소(약 78%)**와 **산소(약 21%)**로 구성되어 있다.\n사용자가 피보나치 수열의 첫 5개 숫자를 요청했고, 챗봇은 1, 1, 2, 3, 5라고 답했다.\n달의 뒷면을 처음 본 인류는 1968년 아폴로 8호 미션의 우주비행사 프랭크 보먼, 짐 러벨, 윌리엄 앤더스이다.",
+    "direct_parent_id": null,
+    "all_parent_ids": [],
+    "children_ids": [
+      "7d121ad6-bc24-4246-bfc7-caab73ba2695",
+      "27dc2c09-a3f6-41db-9b46-a37cbdfd4674"
+    ],
+    "all_memory_indexes": []
+  },
+  "7d121ad6-bc24-4246-bfc7-caab73ba2695": {
+    "node_id": "7d121ad6-bc24-4246-bfc7-caab73ba2695",
+    "topic": "사용자 이름 확인",
+    "summary": "사용자가 자신의 이름을 김철수라고 밝히자, 어시스턴트가 이를 확인했다.",
+    "direct_parent_id": "7f03e629-d520-478f-8de8-3bd3934a5944",
+    "all_parent_ids": [
+      "7f03e629-d520-478f-8de8-3bd3934a5944"
+    ],
+    "children_ids": [],
+    "all_memory_indexes": [
+      5
+    ]
+  },
+  "81deaee6-4efb-44a2-a1df-33f2457261ff": {
+    "node_id": "81deaee6-4efb-44a2-a1df-33f2457261ff",
+    "topic": "DNA 구조 발견",
+    "summary": "DNA 이중나선 구조를 발견한 과학자는 왓슨과 크릭이다.",
+    "direct_parent_id": "27dc2c09-a3f6-41db-9b46-a37cbdfd4674",
+    "all_parent_ids": [
+      "7f03e629-d520-478f-8de8-3bd3934a5944",
+      "27dc2c09-a3f6-41db-9b46-a37cbdfd4674"
+    ],
+    "children_ids": [],
+    "all_memory_indexes": [
+      6
+    ]
+  },
+  "878fc21d-611e-40b5-bbc7-c32a9debdee1": {
+    "node_id": "878fc21d-611e-40b5-bbc7-c32a9debdee1",
+    "topic": "빛의 속도",
+    "summary": "빛의 속도는 초속 299,792,458미터이다.\n사용자가 전자기파의 예를 요청했고, 조수는 '라디오파'라고 답변했다.",
+    "direct_parent_id": "7a79ac6f-0426-4d37-b108-d6e2436bcef8",
+    "all_parent_ids": [
+      "7f03e629-d520-478f-8de8-3bd3934a5944",
+      "27dc2c09-a3f6-41db-9b46-a37cbdfd4674",
+      "7a79ac6f-0426-4d37-b108-d6e2436bcef8"
+    ],
+    "children_ids": [],
+    "all_memory_indexes": [
+      7,
+      15
+    ]
+  },
+  "27dc2c09-a3f6-41db-9b46-a37cbdfd4674": {
+    "node_id": "27dc2c09-a3f6-41db-9b46-a37cbdfd4674",
+    "topic": "과학적 사실 및 원리",
+    "summary": "대화는 뉴턴의 관성 법칙, 물의 화학식(H2O), 태양계 최대 행성(목성), DNA 이중나선 발견자(왓슨과 크릭), 빛의 속도 등 다양한 과학적 사실들을 설명하고 질문에 답하는 형식으로 이루어져 있다.\n수소 원자의 원자번호는 1이다.\n에베레스트산의 높이는 약 8,848.86 미터이다.\n지구의 자전주기가 약 24시간이라는 질문과 답변 내용입니다.\n물은 섭씨 100도(°C) 또는 화씨 212도(°F)에서 끓는다.\n원소기호 O는 산소를 의미한다.\n사용자가 전자기파의 예를 요청했고, 조수는 '라디오파'라고 답변했다.\n지구의 대기는 주로 **질소(약 78%)**와 **산소(약 21%)**로 구성되어 있다.\n사용자가 피보나치 수열의 첫 5개 숫자를 요청했고, 챗봇은 1, 1, 2, 3, 5라고 답했다.\n달의 뒷면을 처음 본 인류는 1968년 아폴로 8호 미션의 우주비행사 프랭크 보먼, 짐 러벨, 윌리엄 앤더스이다.",
+    "direct_parent_id": "7f03e629-d520-478f-8de8-3bd3934a5944",
+    "all_parent_ids": [
+      "7f03e629-d520-478f-8de8-3bd3934a5944"
+    ],
+    "children_ids": [
+      "61350f69-48ba-45c9-b5d4-5fae0d76b4a9",
+      "fbaec125-f332-4cb9-abfc-5143a303efc8",
+      "81deaee6-4efb-44a2-a1df-33f2457261ff",
+      "ef07f21e-fac6-45d4-8477-95d972e5a560",
+      "7a79ac6f-0426-4d37-b108-d6e2436bcef8"
+    ],
+    "all_memory_indexes": []
+  },
+  "ef07f21e-fac6-45d4-8477-95d972e5a560": {
+    "node_id": "ef07f21e-fac6-45d4-8477-95d972e5a560",
+    "topic": "관성의 법칙",
+    "summary": "뉴턴의 제1법칙은 '관성의 법칙'이라고도 불리며, 외부에서 힘이 가해지지 않는 한 정지한 물체는 계속 정지하고, 움직이는 물체는 같은 속도와 방향으로 계속 움직이려 한다는 내용이다.",
+    "direct_parent_id": "27dc2c09-a3f6-41db-9b46-a37cbdfd4674",
+    "all_parent_ids": [
+      "7f03e629-d520-478f-8de8-3bd3934a5944",
+      "27dc2c09-a3f6-41db-9b46-a37cbdfd4674"
+    ],
+    "children_ids": [],
+    "all_memory_indexes": [
+      8
+    ]
+  },
+  "cd607239-07d4-467c-905d-cf0c04b11e27": {
+    "node_id": "cd607239-07d4-467c-905d-cf0c04b11e27",
+    "topic": "에베레스트 고도",
+    "summary": "에베레스트산의 높이는 약 8,848.86 미터이다.",
+    "direct_parent_id": "fbaec125-f332-4cb9-abfc-5143a303efc8",
+    "all_parent_ids": [
+      "7f03e629-d520-478f-8de8-3bd3934a5944",
+      "27dc2c09-a3f6-41db-9b46-a37cbdfd4674",
+      "fbaec125-f332-4cb9-abfc-5143a303efc8"
+    ],
+    "children_ids": [],
+    "all_memory_indexes": [
+      10
+    ]
+  },
+  "06814000-3563-4a8d-86bb-0e9046de9a07": {
+    "node_id": "06814000-3563-4a8d-86bb-0e9046de9a07",
+    "topic": "지구 자전주기",
+    "summary": "지구의 자전주기가 약 24시간이라는 질문과 답변 내용입니다.",
+    "direct_parent_id": "fbaec125-f332-4cb9-abfc-5143a303efc8",
+    "all_parent_ids": [
+      "7f03e629-d520-478f-8de8-3bd3934a5944",
+      "27dc2c09-a3f6-41db-9b46-a37cbdfd4674",
+      "fbaec125-f332-4cb9-abfc-5143a303efc8"
+    ],
+    "children_ids": [],
+    "all_memory_indexes": [
+      11
+    ]
+  },
+  "f1d54b88-a218-4b06-981e-0e995bf962db": {
+    "node_id": "f1d54b88-a218-4b06-981e-0e995bf962db",
+    "topic": "사용자 나이 정보",
+    "summary": "사용자는 자신의 나이가 19세라고 밝혔습니다.",
+    "direct_parent_id": "c1c88750-dfb8-4569-8f92-875ad03c607d",
+    "all_parent_ids": [
+      "c1c88750-dfb8-4569-8f92-875ad03c607d"
+    ],
+    "children_ids": [],
+    "all_memory_indexes": [
+      12
+    ]
+  },
+  "1676dc62-6fbd-4b68-ab41-1e2bea5ec095": {
+    "node_id": "1676dc62-6fbd-4b68-ab41-1e2bea5ec095",
+    "topic": "물의 끓는점",
+    "summary": "물은 섭씨 100도(°C) 또는 화씨 212도(°F)에서 끓는다.",
+    "direct_parent_id": "61350f69-48ba-45c9-b5d4-5fae0d76b4a9",
+    "all_parent_ids": [
+      "7f03e629-d520-478f-8de8-3bd3934a5944",
+      "27dc2c09-a3f6-41db-9b46-a37cbdfd4674",
+      "61350f69-48ba-45c9-b5d4-5fae0d76b4a9"
+    ],
+    "children_ids": [],
+    "all_memory_indexes": [
+      13
+    ]
+  },
+  "fb8845cf-e0fa-4756-8b43-ceac636ea66d": {
+    "node_id": "fb8845cf-e0fa-4756-8b43-ceac636ea66d",
+    "topic": "산소 원소 기호",
+    "summary": "원소기호 O는 산소를 의미한다.\n지구의 대기는 주로 **질소(약 78%)**와 **산소(약 21%)**로 구성되어 있다.",
+    "direct_parent_id": "61350f69-48ba-45c9-b5d4-5fae0d76b4a9",
+    "all_parent_ids": [
+      "7f03e629-d520-478f-8de8-3bd3934a5944",
+      "27dc2c09-a3f6-41db-9b46-a37cbdfd4674",
+      "61350f69-48ba-45c9-b5d4-5fae0d76b4a9"
+    ],
+    "children_ids": [],
+    "all_memory_indexes": [
+      14,
+      17
+    ]
+  },
+  "c1c88750-dfb8-4569-8f92-875ad03c607d": {
+    "node_id": "c1c88750-dfb8-4569-8f92-875ad03c607d",
+    "topic": "사용자 정보 및 관심사",
+    "summary": "사용자는 AI에 흥미를 표명하며 자신의 나이가 19세임을 밝혔다. 어시스턴트는 AI의 어떤 점이 가장 마음에 드는지 질문하며 대화를 이어갔다.\n사용자는 인공지능 Gemini를 선호한다.",
+    "direct_parent_id": null,
+    "all_parent_ids": [],
+    "children_ids": [
+      "f1d54b88-a218-4b06-981e-0e995bf962db",
+      "c910b858-de1e-4136-9265-f0980a99c1b4"
+    ],
+    "all_memory_indexes": []
+  },
+  "c910b858-de1e-4136-9265-f0980a99c1b4": {
+    "node_id": "c910b858-de1e-4136-9265-f0980a99c1b4",
+    "topic": "인공지능 관심",
+    "summary": "사용자는 인공지능에 대한 흥미를 표명했고, 어시스턴트는 어떤 점이 가장 마음에 드는지 질문하며 대화를 이어갔다.\n사용자는 인공지능 Gemini를 선호한다.",
+    "direct_parent_id": "c1c88750-dfb8-4569-8f92-875ad03c607d",
+    "all_parent_ids": [
+      "c1c88750-dfb8-4569-8f92-875ad03c607d"
+    ],
+    "children_ids": [],
+    "all_memory_indexes": [
+      16,
+      19
+    ]
+  },
+  "7a79ac6f-0426-4d37-b108-d6e2436bcef8": {
+    "node_id": "7a79ac6f-0426-4d37-b108-d6e2436bcef8",
+    "topic": "수학적 개념과 과학적 사실",
+    "summary": "대화는 피보나치 수열 첫 5개(1,1,2,3,5), 빛의 속도(초속 299,792,458미터), 전자기파의 예시(라디오파)에 대한 정보를 포함한다.",
+    "direct_parent_id": "27dc2c09-a3f6-41db-9b46-a37cbdfd4674",
+    "all_parent_ids": [
+      "7f03e629-d520-478f-8de8-3bd3934a5944",
+      "27dc2c09-a3f6-41db-9b46-a37cbdfd4674"
+    ],
+    "children_ids": [
+      "878fc21d-611e-40b5-bbc7-c32a9debdee1",
+      "0997447e-32ad-4f0c-8b5a-fe023ffdf876"
+    ],
+    "all_memory_indexes": []
+  },
+  "0997447e-32ad-4f0c-8b5a-fe023ffdf876": {
+    "node_id": "0997447e-32ad-4f0c-8b5a-fe023ffdf876",
+    "topic": "피보나치 수열",
+    "summary": "사용자가 피보나치 수열의 첫 5개 숫자를 요청했고, 챗봇은 1, 1, 2, 3, 5라고 답했다.",
+    "direct_parent_id": "7a79ac6f-0426-4d37-b108-d6e2436bcef8",
+    "all_parent_ids": [
+      "7f03e629-d520-478f-8de8-3bd3934a5944",
+      "27dc2c09-a3f6-41db-9b46-a37cbdfd4674",
+      "7a79ac6f-0426-4d37-b108-d6e2436bcef8"
+    ],
+    "children_ids": [],
+    "all_memory_indexes": [
+      18
+    ]
+  },
+  "95f031d8-f2d3-4cd3-a70b-97b3937eef37": {
+    "node_id": "95f031d8-f2d3-4cd3-a70b-97b3937eef37",
+    "topic": "달 뒷면 최초 관측",
+    "summary": "달의 뒷면을 처음 본 인류는 1968년 아폴로 8호 미션의 우주비행사 프랭크 보먼, 짐 러벨, 윌리엄 앤더스이다.",
+    "direct_parent_id": "fbaec125-f332-4cb9-abfc-5143a303efc8",
+    "all_parent_ids": [
+      "7f03e629-d520-478f-8de8-3bd3934a5944",
+      "27dc2c09-a3f6-41db-9b46-a37cbdfd4674",
+      "fbaec125-f332-4cb9-abfc-5143a303efc8"
+    ],
+    "children_ids": [],
+    "all_memory_indexes": [
+      20
+    ]
+  }
+}
