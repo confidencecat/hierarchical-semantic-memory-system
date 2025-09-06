@@ -1,7 +1,7 @@
 import asyncio
 from config import (
     SEARCH_MODE, NO_RECORD, DEBUG, FANOUT_LIMIT, MAX_SUMMARY_LENGTH, 
-    UPDATE_TOPIC, GEMINI_MODEL, TEST_Q, debug_print
+    UPDATE_TOPIC, GEMINI_MODEL, TEST_Q, debug_print, DEBUG_TXT, debug_log_separator, debug_log_close
 )
 from ai_func import need_memory_judgement_AI, respond_AI
 from tree import search_tree, save_tree
@@ -11,6 +11,7 @@ from memory import initialize_json_files
 current_search_mode = SEARCH_MODE
 current_no_record = NO_RECORD
 current_debug = DEBUG
+current_debug_txt = DEBUG_TXT  # config에서 가져옴
 current_fanout_limit = FANOUT_LIMIT
 current_max_summary_length = MAX_SUMMARY_LENGTH
 current_update_topic = UPDATE_TOPIC
@@ -19,7 +20,7 @@ current_model = GEMINI_MODEL
 # 실시간 명령어 처리
 def command(command_input):
     """실시간 명령어 처리 함수"""
-    global current_search_mode, current_no_record, current_debug
+    global current_search_mode, current_no_record, current_debug, current_debug_txt
     global current_fanout_limit, current_max_summary_length, current_update_topic, current_model
     
     parts = command_input.strip().split()
@@ -33,11 +34,13 @@ def command(command_input):
 !status                 - 현재 시스템 상태 표시
 !search [MODE]          - 검색 모드 변경 (efficiency/force/no)
 !debug                  - 디버그 모드 토글
+!debug-text             - 디버그 텍스트 파일 저장 모드 토글
 !fanout-limit [NUMBER]  - fanout 제한값 변경 (1-50)
 !model [MODEL_NAME]     - AI 모델 변경
-!no-record              - 기록 모드 토글
+!record [MODE]          - 기록 모드 변경 (ON/OFF)
 !update-topic [MODE]    - 토픽 업데이트 정책 변경 (always/smart/never)
 !max-summary [NUMBER]   - 요약 최대 길이 설정 (100-1000)
+!tree                   - 트리 구조 표시
 """)
     
     elif cmd == '!api-info':
@@ -55,8 +58,9 @@ def command(command_input):
     elif cmd == '!status':
         print(f"\n=== 시스템 상태 ===")
         print(f"검색 모드: {current_search_mode}")
-        print(f"기록 모드: {'OFF' if current_no_record else 'ON'}")
+        print(f"기록 모드: {'ON' if not current_no_record else 'OFF'}")
         print(f"디버그 모드: {'ON' if current_debug else 'OFF'}")
+        print(f"디버그 텍스트 저장: {'ON' if current_debug_txt else 'OFF'}")
         print(f"Fanout 제한: {current_fanout_limit}")
         print(f"최대 요약 길이: {current_max_summary_length}")
         print(f"토픽 업데이트: {current_update_topic}")
@@ -64,9 +68,11 @@ def command(command_input):
     
     elif cmd == '!search':
         if len(parts) > 1:
+            import config
             mode = parts[1].lower()
             if mode in ['efficiency', 'force', 'no']:
                 current_search_mode = mode
+                config.SEARCH_MODE = mode
                 print(f"검색 모드가 '{mode}'로 변경되었습니다.")
             else:
                 print("잘못된 검색 모드입니다. (efficiency/force/no)")
@@ -74,15 +80,29 @@ def command(command_input):
             print(f"현재 검색 모드: {current_search_mode}")
     
     elif cmd == '!debug':
+        import config
         current_debug = not current_debug
+        config.DEBUG = current_debug
         print(f"디버그 모드: {'ON' if current_debug else 'OFF'}")
+    
+    elif cmd == '!debug-text':
+        import config
+        current_debug_txt = not current_debug_txt
+        config.DEBUG_TXT = current_debug_txt
+        if current_debug_txt:
+            config.debug_log_init()  # 디버그 텍스트 파일 초기화
+        else:
+            config.debug_log_close()  # 디버그 텍스트 파일 닫기
+        print(f"디버그 텍스트 저장: {'ON' if current_debug_txt else 'OFF'}")
     
     elif cmd == '!fanout-limit':
         if len(parts) > 1:
             try:
+                import config
                 limit = int(parts[1])
                 if 1 <= limit <= 50:
                     current_fanout_limit = limit
+                    config.FANOUT_LIMIT = limit
                     print(f"Fanout 제한이 {limit}로 변경되었습니다.")
                 else:
                     print("Fanout 제한은 1-50 범위여야 합니다.")
@@ -99,9 +119,17 @@ def command(command_input):
         else:
             print(f"현재 AI 모델: {current_model}")
     
-    elif cmd == '!no-record':
-        current_no_record = not current_no_record
-        print(f"기록 모드: {'OFF' if current_no_record else 'ON'}")
+    elif cmd == '!record':
+        if len(parts) > 1:
+            mode = parts[1].upper()
+            if mode in ['ON', 'OFF']:
+                current_no_record = (mode == 'OFF')  # record ON이면 no_record는 False
+                print(f"기록 모드: {mode}")
+            else:
+                print("잘못된 기록 모드입니다. (ON/OFF)")
+        else:
+            current_mode = 'ON' if not current_no_record else 'OFF'
+            print(f"현재 기록 모드: {current_mode}")
     
     elif cmd == '!update-topic':
         if len(parts) > 1:
@@ -128,6 +156,10 @@ def command(command_input):
         else:
             print(f"현재 최대 요약 길이: {current_max_summary_length}")
     
+    elif cmd == '!tree':
+        from hsms import show_tree_structure
+        show_tree_structure()
+    
     else:
         print(f"알 수 없는 명령어: {cmd}")
         print("!help로 사용 가능한 명령어를 확인하세요.")
@@ -139,6 +171,10 @@ async def main(user_question):
     global current_search_mode, current_no_record, current_debug
     
     if current_debug:
+        debug_print(f"대화 처리 시작: {user_question[:50]}...")
+    
+    # DEBUG_TXT가 ON이면 항상 로그 남김 (DEBUG가 OFF여도)
+    elif current_debug_txt:
         debug_print(f"대화 처리 시작: {user_question[:50]}...")
     
     # 1. 기억 필요성 판단
@@ -154,15 +190,27 @@ async def main(user_question):
     if need_memory:
         if current_debug:
             debug_print("기억 검색 시작...")
+        elif current_debug_txt:
+            debug_print("기억 검색 시작...")
+            
         memory_results = await search_tree(user_question)  # ALL_MEMORY 인덱스 리스트 반환
+        
         if current_debug:
+            debug_print(f"기억 검색 완료: {len(memory_results)}개 기억 발견")
+        elif current_debug_txt:
             debug_print(f"기억 검색 완료: {len(memory_results)}개 기억 발견")
     
     # 3. 응답 생성
     if current_debug:
         debug_print("응답 생성 시작...")
+    elif current_debug_txt:
+        debug_print("응답 생성 시작...")
+        
     response = respond_AI(user_question, memory_results)
+    
     if current_debug:
+        debug_print("응답 생성 완료")
+    elif current_debug_txt:
         debug_print("응답 생성 완료")
     
     # 4. 기억 저장 (NO_RECORD가 False인 경우)
@@ -173,9 +221,19 @@ async def main(user_question):
         ]
         if current_debug:
             debug_print("기억 저장 시작...")
+        elif current_debug_txt:
+            debug_print("기억 저장 시작...")
+            
         await save_tree(conversation_pair)
+        
         if current_debug:
             debug_print("기억 저장 완료")
+        elif current_debug_txt:
+            debug_print("기억 저장 완료")
+    
+    # 질의응답 완료 후 구분선 추가
+    if current_debug_txt:
+        debug_log_separator()
     
     return response
 
@@ -219,6 +277,10 @@ def chat_mode():
             if current_debug:
                 import traceback
                 traceback.print_exc()
+    
+    # 종료 시 디버그 로그 파일 닫기
+    if current_debug_txt:
+        debug_log_close()
 
 # 자동화 테스트 모드
 def test_mode():

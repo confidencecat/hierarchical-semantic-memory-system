@@ -110,8 +110,9 @@ DEBUG = False
 DEBUG_TXT = False
 NO_RECORD = False
 
-# 디버그 로그 파일 핸들
+# 디버그 로그 파일 핸들과 파일명
 debug_log_file = None
+debug_log_filename = None
 
 def get_timestamp():
     """현재 시간을 지정된 형식으로 반환"""
@@ -119,25 +120,65 @@ def get_timestamp():
 
 def debug_log_init():
     """디버그 로그 파일 초기화"""
-    global debug_log_file
-    if DEBUG_TXT and debug_log_file is None:
+    global debug_log_file, debug_log_filename
+    if DEBUG_TXT:
+        # 기존 파일이 열려있다면 닫기
+        if debug_log_file:
+            debug_log_file.close()
+            debug_log_file = None
+        
+        # 새 파일명 생성 (매번 새로운 타임스탬프)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"debug_log_{timestamp}.txt"
-        debug_log_file = open(filename, 'w', encoding='utf-8')
-        debug_log_file.write(f"Debug log started at {get_timestamp()}\n")
-        debug_log_file.flush()
+        debug_log_filename = f"debug_log_{timestamp}.txt"
+        
+        # 초기 메시지 쓰기
+        try:
+            with open(debug_log_filename, 'w', encoding='utf-8') as f:
+                f.write(f"Debug log started at {get_timestamp()}\n")
+                f.flush()
+                os.fsync(f.fileno())
+            print(f"디버그 로그 파일 생성: {debug_log_filename}")
+        except Exception as e:
+            print(f"디버그 로그 파일 생성 오류: {e}")
 
 def debug_print(message, end='\n'):
     """타임스탬프가 포함된 디버그 메시지 출력"""
+    timestamp = get_timestamp()
+    formatted_message = f"{timestamp} >>> {message}"
+    
+    # 화면 출력 (DEBUG가 True일 때만)
     if DEBUG:
-        timestamp = get_timestamp()
-        formatted_message = f">>> {message} | {timestamp}"
         print(formatted_message, end=end)
-        
-        # 파일에도 저장
-        if DEBUG_TXT and debug_log_file:
-            debug_log_file.write(formatted_message + end)
-            debug_log_file.flush()
+    
+    # 파일 저장 (DEBUG_TXT가 True일 때는 항상) - 확실한 즉시 저장
+    if DEBUG_TXT and debug_log_filename:
+        try:
+            with open(debug_log_filename, 'a', encoding='utf-8') as f:
+                f.write(formatted_message + end)
+                f.flush()
+                os.fsync(f.fileno())  # OS 레벨 강제 디스크 쓰기
+        except Exception as e:
+            print(f"디버그 로그 쓰기 오류: {e}")
+
+def debug_log_separator():
+    """디버그 로그에 구분선 추가"""
+    if DEBUG_TXT and debug_log_filename:
+        separator = "=" * 60 + "\n"
+        try:
+            with open(debug_log_filename, 'a', encoding='utf-8') as f:
+                f.write(separator)
+                f.flush()
+                os.fsync(f.fileno())
+        except Exception as e:
+            print(f"디버그 로그 구분선 쓰기 오류: {e}")
+
+def debug_log_close():
+    """디버그 로그 파일 닫기"""
+    global debug_log_file, debug_log_filename
+    if debug_log_file:
+        debug_log_file.close()
+        debug_log_file = None
+    debug_log_filename = None
 
 def create_uuid():
     """UUID4 문자열 생성"""
@@ -215,7 +256,7 @@ def get_root_children_ids():
     """ROOT 노드의 직접 자식 ID들 반환"""
     try:
         from memory import load_json
-        hierarchical_data = load_json('hierarchical_memory.json', {})
+        hierarchical_data = load_json('memory/hierarchical_memory.json', {})
         
         root_children = []
         for node_id, node_data in hierarchical_data.items():

@@ -10,7 +10,7 @@ EXPLORATION_THRESHOLD = 0.5  # 탐색을 계속하는 임계값 (적당하게)
 # ROOT 노드의 자식 ID들 조회
 def get_root_children_ids():
     """ROOT 노드의 직접 자식들 반환"""
-    hierarchical_memory = load_json('hierarchical_memory.json', {})
+    hierarchical_memory = load_json('memory/hierarchical_memory.json', {})
     root_children = []
     
     for node_id, node_data in hierarchical_memory.items():

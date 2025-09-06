@@ -39,7 +39,7 @@ def show_tree_structure():
     """현재 트리 구조를 도식화하여 표시"""
     print("\n=== 트리 구조 ===")
     
-    hierarchical_memory = load_json('hierarchical_memory.json', {})
+    hierarchical_memory = load_json('memory/hierarchical_memory.json', {})
     if not hierarchical_memory:
         print("저장된 트리 구조가 없습니다.")
         return
@@ -132,7 +132,7 @@ def main():
 예시:
   python hsms.py                              # 기본 대화 모드
   python hsms.py --mode test --debug          # 테스트 모드 (디버그 포함)
-  python hsms.py --search force --no-record   # 강제 검색, 기록 안함
+  python hsms.py --search force --record OFF   # 강제 검색, 기록 안함
   python hsms.py --api-info                   # API 정보만 표시
   python hsms.py --tree                       # 트리 구조만 표시
         """
@@ -178,9 +178,10 @@ def main():
         help='사용할 AI 모델 (기본값: gemini-2.5-flash)'
     )
     parser.add_argument(
-        '--no-record',
-        action='store_true',
-        help='대화를 기억 시스템에 저장하지 않음 (단순 응답 모드)'
+        '--record',
+        choices=['ON', 'OFF'],
+        default='ON',
+        help='대화를 기억 시스템에 저장할지 여부 (ON: 저장, OFF: 저장 안함)'
     )
     parser.add_argument(
         '--update-topic',
@@ -223,7 +224,7 @@ def main():
     print(f"  실행 모드: {args.mode}")
     print(f"  검색 모드: {args.search}")
     print(f"  디버그 모드: {'ON' if args.debug else 'OFF'}")
-    print(f"  기록 모드: {'OFF' if args.no_record else 'ON'}")
+    print(f"  기록 모드: {args.record}")
     print(f"  Fanout 제한: {args.fanout_limit}")
     print(f"  AI 모델: {args.model}")
     print(f"  토픽 업데이트: {args.update_topic}")
@@ -231,7 +232,7 @@ def main():
     # 전역 설정 업데이트
     import main_ai
     main_ai.current_search_mode = args.search
-    main_ai.current_no_record = args.no_record
+    main_ai.current_no_record = (args.record == 'OFF')  # record OFF이면 no_record는 True
     main_ai.current_debug = args.debug
     main_ai.current_fanout_limit = args.fanout_limit
     main_ai.current_max_summary_length = 300  # 기본값
@@ -243,7 +244,7 @@ def main():
     config.FANOUT_LIMIT = args.fanout_limit
     config.GEMINI_MODEL = args.model
     config.SEARCH_MODE = args.search
-    config.NO_RECORD = args.no_record
+    config.NO_RECORD = (args.record == 'OFF')  # record OFF이면 no_record는 True
     config.DEBUG = args.debug
     config.UPDATE_TOPIC = args.update_topic
     

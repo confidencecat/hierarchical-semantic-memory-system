@@ -181,7 +181,7 @@ def respond_AI(user_input: str, memory: list = None) -> str:
     prompt = ""
     
     if memory:
-        all_memory = load_json('all_memory.json', [])
+        all_memory = load_json('memory/all_memory.json', [])
         for idx in memory:
             if 0 <= idx < len(all_memory):
                 conversation = all_memory[idx]
@@ -263,7 +263,7 @@ async def judgement_similar_multi_AI(node_ids: list, current_conversation: str) 
             queries.append("0.0")  # 노드가 없으면 0.0
     
     start_debug_message = "=============[ judgement_similar_AI ]============= [ START ]"
-    end_debug_message = "=============[ judgement_similar_AI ]============= [ END ]"
+    end_debug_message = "=============[ judgement_similar_AI ]============= [  END  ]"
     
     results = await ASYNC_MULTI_AI(
         queries, system_prompt, debug=True, 

@@ -6,22 +6,19 @@ from datetime import datetime
 from config import debug_print, get_timestamp
 
 # JSON 파일 안전 저장
-def save_json(file_path: str, data, backup: bool = True) -> bool:
+def save_json(file_path: str, data, backup: bool = False) -> bool:
     """
     딕셔너리 데이터를 JSON 파일로 안전하게 저장
     Args:
         file_path: 저장할 파일 경로
         data: 저장할 데이터
-        backup: 기존 파일 백업 여부
+        backup: 기존 파일 백업 여부 (기본값: False)
     Returns:
         bool: 저장 성공 여부
     """
     try:
-        # 백업 생성
-        if backup and os.path.exists(file_path):
-            backup_path = f"{file_path}.backup"
-            shutil.copy2(file_path, backup_path)
-            # debug_print(f"Backup created: {backup_path}")
+        # 디렉토리 생성
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
         
         # 임시 파일에 저장 (원자적 쓰기)
         temp_path = f"{file_path}.tmp"
@@ -92,14 +89,14 @@ def update_all_memory(new_conversation: list) -> int:
     """
     try:
         # 기존 ALL_MEMORY 로드
-        all_memory = load_json('all_memory.json', [])
+        all_memory = load_json('memory/all_memory.json', [])
         
         # 새 대화 추가
         all_memory.append(new_conversation)
         index = len(all_memory) - 1
         
         # 파일 저장
-        if save_json('all_memory.json', all_memory):
+        if save_json('memory/all_memory.json', all_memory):
             debug_print(f"New conversation added to all_memory.json at index {index}")
             return index
         else:
@@ -120,7 +117,7 @@ def get_node_data(node_id: str):
         노드 데이터 딕셔너리 또는 None
     """
     try:
-        hierarchical_memory = load_json('hierarchical_memory.json', {})
+        hierarchical_memory = load_json('memory/hierarchical_memory.json', {})
         return hierarchical_memory.get(node_id, None)
         
     except Exception as e:
@@ -139,13 +136,13 @@ def save_node_data(node_id: str, node_data: dict) -> bool:
     """
     try:
         # 기존 계층 메모리 로드
-        hierarchical_memory = load_json('hierarchical_memory.json', {})
+        hierarchical_memory = load_json('memory/hierarchical_memory.json', {})
         
         # 노드 데이터 업데이트
         hierarchical_memory[node_id] = node_data
         
         # 파일 저장
-        success = save_json('hierarchical_memory.json', hierarchical_memory)
+        success = save_json('memory/hierarchical_memory.json', hierarchical_memory)
         if success:
             debug_print(f"Node data saved for {node_id}")
         else:
@@ -220,13 +217,13 @@ def validate_data_structure() -> bool:
     """
     try:
         # all_memory.json 검증
-        all_memory = load_json('all_memory.json', [])
+        all_memory = load_json('memory/all_memory.json', [])
         if not isinstance(all_memory, list):
             debug_print("ERROR: all_memory.json should be a list")
             return False
         
         # hierarchical_memory.json 검증
-        hierarchical_memory = load_json('hierarchical_memory.json', {})
+        hierarchical_memory = load_json('memory/hierarchical_memory.json', {})
         if not isinstance(hierarchical_memory, dict):
             debug_print("ERROR: hierarchical_memory.json should be a dictionary")
             return False
@@ -252,13 +249,13 @@ def initialize_json_files():
     """초기 JSON 파일들을 생성"""
     try:
         # all_memory.json 초기화
-        if not os.path.exists('all_memory.json'):
-            save_json('all_memory.json', [])
+        if not os.path.exists('memory/all_memory.json'):
+            save_json('memory/all_memory.json', [])
             debug_print("Created all_memory.json")
         
         # hierarchical_memory.json 초기화
-        if not os.path.exists('hierarchical_memory.json'):
-            save_json('hierarchical_memory.json', {})
+        if not os.path.exists('memory/hierarchical_memory.json'):
+            save_json('memory/hierarchical_memory.json', {})
             debug_print("Created hierarchical_memory.json")
         
         return True
