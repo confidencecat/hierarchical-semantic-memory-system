@@ -1,0 +1,5 @@
+.env
+memory/*.json
+.json
+.json.backup
+backup-repo.git/
