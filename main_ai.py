@@ -7,11 +7,10 @@ from ai_func import need_memory_judgement_AI, respond_AI
 from tree import search_tree, save_tree
 from memory import initialize_json_files
 
-# 전역 설정 변수들 (런타임에 변경 가능)
 current_search_mode = SEARCH_MODE
 current_no_record = NO_RECORD
 current_debug = DEBUG
-current_debug_txt = DEBUG_TXT  # config에서 가져옴
+current_debug_txt = DEBUG_TXT
 current_fanout_limit = FANOUT_LIMIT
 current_max_summary_length = MAX_SUMMARY_LENGTH
 current_update_topic = UPDATE_TOPIC
@@ -47,10 +46,10 @@ def command(command_input):
         from config import AI_API_N, LOAD_API_N, AI_API, LOAD_API
         print(f"\n=== API 키 정보 ===")
         print(f"AI_API: {AI_API_N}개")
-        for i, key in enumerate(AI_API[:3]):  # 처음 3개만 표시
+        for i, key in enumerate(AI_API[:3]):
             print(f"  AI_{i+1}: {key[:4]}****")
         print(f"LOAD_API: {LOAD_API_N}개")
-        for i, key in enumerate(LOAD_API[:5]):  # 처음 5개만 표시
+        for i, key in enumerate(LOAD_API[:5]):
             print(f"  LOAD_{i+1}: {key[:4]}****")
         if LOAD_API_N > 5:
             print(f"  ... 외 {LOAD_API_N-5}개")
@@ -90,9 +89,9 @@ def command(command_input):
         current_debug_txt = not current_debug_txt
         config.DEBUG_TXT = current_debug_txt
         if current_debug_txt:
-            config.debug_log_init()  # 디버그 텍스트 파일 초기화
+            config.debug_log_init()
         else:
-            config.debug_log_close()  # 디버그 텍스트 파일 닫기
+            config.debug_log_close()
         print(f"디버그 텍스트 저장: {'ON' if current_debug_txt else 'OFF'}")
     
     elif cmd == '!fanout-limit':
@@ -167,17 +166,15 @@ def command(command_input):
 # 핵심 대화 처리 로직
 async def main(user_question):
     """핵심 대화 처리 함수"""
-    # 전역 설정 값들을 config 모듈에서 가져와서 사용
     global current_search_mode, current_no_record, current_debug
     
     if current_debug:
         debug_print(f"대화 처리 시작: {user_question[:50]}...")
     
-    # DEBUG_TXT가 ON이면 항상 로그 남김 (DEBUG가 OFF여도)
     elif current_debug_txt:
         debug_print(f"대화 처리 시작: {user_question[:50]}...")
     
-    # 1. 기억 필요성 판단
+    # 기억 필요성 판단
     need_memory = False
     if current_search_mode == 'efficiency':
         need_memory = need_memory_judgement_AI(user_question)
@@ -185,7 +182,7 @@ async def main(user_question):
         need_memory = True
     # current_search_mode == 'no'인 경우 need_memory는 False 유지
     
-    # 2. 기억 검색 (필요한 경우)
+    # 기억 검색 (필요한 경우)
     memory_results = []
     if need_memory:
         if current_debug:
@@ -200,7 +197,7 @@ async def main(user_question):
         elif current_debug_txt:
             debug_print(f"기억 검색 완료: {len(memory_results)}개 기억 발견")
     
-    # 3. 응답 생성
+    # 응답 생성
     if current_debug:
         debug_print("응답 생성 시작...")
     elif current_debug_txt:
@@ -213,7 +210,7 @@ async def main(user_question):
     elif current_debug_txt:
         debug_print("응답 생성 완료")
     
-    # 4. 기억 저장 (NO_RECORD가 False인 경우)
+    # 기억 저장 (NO_RECORD가 False인 경우)
     if not current_no_record:
         conversation_pair = [
             {"role": "user", "content": user_question},
@@ -237,18 +234,15 @@ async def main(user_question):
     
     return response
 
-# 동기 래퍼 함수
 def main_sync(user_question):
     """main 함수의 동기 버전"""
     return asyncio.run(main(user_question))
 
-# 터미널 대화형 모드
 def chat_mode():
     """터미널 기반 대화형 모드"""
     print("=== HSMS 대화 모드 시작 ===")
     print("'!help'로 명령어 확인, 'exit'로 종료")
     
-    # JSON 파일 초기화
     initialize_json_files()
     
     while True:
@@ -263,7 +257,7 @@ def chat_mode():
                 command(user_input)
                 continue
             
-            if not user_input:  # 빈 입력 처리
+            if not user_input:
                 continue
                 
             response = main_sync(user_input)
@@ -278,7 +272,6 @@ def chat_mode():
                 import traceback
                 traceback.print_exc()
     
-    # 종료 시 디버그 로그 파일 닫기
     if current_debug_txt:
         debug_log_close()
 
@@ -287,7 +280,6 @@ def test_mode():
     """자동화된 테스트 모드"""
     print("=== HSMS 테스트 모드 시작 ===")
     
-    # JSON 파일 초기화
     initialize_json_files()
     
     for i, test_question in enumerate(TEST_Q, 1):
@@ -308,12 +300,10 @@ def test_mode():
     
     print("\n=== 테스트 완료 ===")
 
-# 단일 질문 처리 (외부 API용)
 def process_single_question(question, search_mode="efficiency", no_record=False, debug=False):
     """단일 질문을 처리하는 외부 API용 함수"""
     global current_search_mode, current_no_record, current_debug
     
-    # 임시로 설정 변경
     old_search_mode = current_search_mode
     old_no_record = current_no_record
     old_debug = current_debug
@@ -326,7 +316,6 @@ def process_single_question(question, search_mode="efficiency", no_record=False,
         response = main_sync(question)
         return response
     finally:
-        # 설정 복원
         current_search_mode = old_search_mode
         current_no_record = old_no_record
         current_debug = old_debug

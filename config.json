@@ -1,0 +1,11 @@
+{
+  "SYSTEM_MODE": "test",
+  "SEARCH_MODE": "force",
+  "UPDATE_TOPIC": "smart",
+  "MODEL": "gemini-2.5-flash",
+  "FANOUT_LIMIT": 10,
+  "MAX_SUMMARY_LENGTH": 1000,
+  "DEBUG": false,
+  "DEBUG_TXT": false,
+  "NO_RECORD": true
+}

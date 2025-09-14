@@ -141,7 +141,6 @@ async def ASYNC_MULTI_AI(queries: list, system_prompt: str, history: list = None
     
     return results
 
-# 기억 필요성 판단 AI
 def need_memory_judgement_AI(user_input: str) -> bool:
     """
     사용자 질문에 대한 기억 검색 필요성 판단
@@ -172,7 +171,6 @@ def need_memory_judgement_AI(user_input: str) -> bool:
     
     return result == 'true'
 
-# 최종 응답 생성 AI
 def respond_AI(user_input: str, memory: list = None) -> str:
     """
     사용자 질문에 대한 최종 응답 생성
@@ -205,7 +203,6 @@ def respond_AI(user_input: str, memory: list = None) -> str:
     
     return result
 
-# 단일 노드 유사도 판단 AI
 def judgement_similar_AI(current_conversation: str, node_id: str) -> str:
     """
     단일 노드와 현재 대화의 유사도 판단
@@ -287,7 +284,6 @@ async def judgement_similar_multi_AI(node_ids: list, current_conversation: str) 
     
     return results
 
-# 클러스터링 AI
 async def clustering_AI(candidate_node_ids: list, current_conversation: str, fanout_limit: int) -> tuple:
     """
     클러스터링 대상 노드 선택 및 새 부모 노드 주제 생성
@@ -311,7 +307,6 @@ async def clustering_AI(candidate_node_ids: list, current_conversation: str, fan
     
     result = AI(prompt, system_prompt)
     
-    # 결과 파싱 (간단한 파싱, 실제로는 더 정교하게 해야 함)
     lines = result.split('\n')
     selected_ids = []
     new_topic = "새 주제"
@@ -327,7 +322,6 @@ async def clustering_AI(candidate_node_ids: list, current_conversation: str, fan
     
     return selected_ids[:fanout_limit-1], new_topic # fanout_limit-1개까지만 선택, 인공지능이 잘못 출력했을 수 도 있으므로
 
-# 대화 요약 AI
 def summary_AI(conversation_data: list, max_length: int = 200) -> str:
     """
     대화 데이터를 지정된 길이로 요약
@@ -345,7 +339,6 @@ def summary_AI(conversation_data: list, max_length: int = 200) -> str:
     debug_print(f"요약 생성 완료 (실제 길이: {len(result)}자)")
     return result.strip()
 
-# 주제명 생성 AI
 def topic_generation_AI(summary_data: str) -> str:
     """
     요약 데이터를 바탕으로 적절한 주제명 생성
@@ -371,12 +364,10 @@ def topic_generation_AI(summary_data: str) -> str:
     
     debug_print("주제 생성 중...")
     result = AI(prompt, system_prompt)
-    # 마크다운 형식 제거
     result = result.strip().replace('**', '').replace('*', '').replace('#', '')
     debug_print(f"주제 생성 완료: '{result}'")
     return result.strip()
 
-# 부모 노드 업데이트 AI
 def parent_update_AI(old_summary: str, new_content: str, max_length: int = 300) -> tuple:
     """
     부모 노드의 요약을 압축하여 업데이트

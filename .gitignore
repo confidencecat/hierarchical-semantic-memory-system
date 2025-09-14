@@ -1,5 +1,7 @@
 .env
-memory/*.json
+memory/
+memory copy/
 .json
 .json.backup
 backup-repo.git/
+benchmark/
