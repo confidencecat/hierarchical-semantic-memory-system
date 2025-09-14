@@ -17,10 +17,9 @@ def save_json(file_path: str, data, backup: bool = False) -> bool:
         bool: 저장 성공 여부
     """
     try:
-        # 디렉토리 생성
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
         
-        # 임시 파일에 저장 (원자적 쓰기)
+        # 임시 파일에 저장(원자적 쓰기)
         temp_path = f"{file_path}.tmp"
         with open(temp_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -32,21 +31,13 @@ def save_json(file_path: str, data, backup: bool = False) -> bool:
         
     except Exception as e:
         debug_print(f"Error saving JSON {file_path}: {e}")
-        # 임시 파일 정리
+        # 임시 파일
         if os.path.exists(f"{file_path}.tmp"):
             os.remove(f"{file_path}.tmp")
         return False
 
 # JSON 파일 안전 로드
 def load_json(file_path: str, default=None):
-    """
-    JSON 파일을 안전하게 로드하여 반환
-    Args:
-        file_path: 로드할 파일 경로
-        default: 파일이 없을 때 반환할 기본값
-    Returns:
-        로드된 데이터 또는 기본값
-    """
     try:
         if not os.path.exists(file_path):
             # debug_print(f"File not found: {file_path}, returning default")
@@ -80,13 +71,6 @@ def load_json(file_path: str, default=None):
 
 # ALL_MEMORY에 새 대화 추가
 def update_all_memory(new_conversation: list) -> int:
-    """
-    ALL_MEMORY.json에 새로운 대화 추가
-    Args:
-        new_conversation: 사용자-AI 대화 쌍
-    Returns:
-        int: 추가된 대화의 인덱스
-    """
     try:
         # 기존 ALL_MEMORY 로드
         all_memory = load_json('memory/all_memory.json', [])
@@ -109,13 +93,6 @@ def update_all_memory(new_conversation: list) -> int:
 
 # 노드 데이터 조회
 def get_node_data(node_id: str):
-    """
-    특정 노드의 전체 데이터 반환
-    Args:
-        node_id: UUID4 형식의 노드 식별자
-    Returns:
-        노드 데이터 딕셔너리 또는 None
-    """
     try:
         hierarchical_memory = load_json('memory/hierarchical_memory.json', {})
         return hierarchical_memory.get(node_id, None)
@@ -126,14 +103,6 @@ def get_node_data(node_id: str):
 
 # 노드 데이터 저장
 def save_node_data(node_id: str, node_data: dict) -> bool:
-    """
-    특정 노드의 데이터 업데이트
-    Args:
-        node_id: 업데이트할 노드 ID
-        node_data: 새로운 노드 데이터
-    Returns:
-        bool: 저장 성공 여부
-    """
     try:
         # 기존 계층 메모리 로드
         hierarchical_memory = load_json('memory/hierarchical_memory.json', {})
@@ -156,16 +125,6 @@ def save_node_data(node_id: str, node_data: dict) -> bool:
 
 # 새 노드 생성
 def create_new_node(topic: str, summary: str, parent_id: str = None, memory_indexes: list = None) -> str:
-    """
-    새로운 노드 생성 및 트리에 추가
-    Args:
-        topic: 노드 주제명
-        summary: 노드 요약
-        parent_id: 부모 노드 ID (ROOT인 경우 None)
-        memory_indexes: 기억 노드인 경우 대화 인덱스 리스트
-    Returns:
-        str: 생성된 노드의 UUID
-    """
     try:
         # 새 노드 ID 생성
         new_node_id = str(uuid.uuid4())
@@ -244,7 +203,6 @@ def validate_data_structure() -> bool:
         debug_print(f"Error during data structure validation: {e}")
         return False
 
-# 초기 JSON 파일 생성
 def initialize_json_files():
     """초기 JSON 파일들을 생성"""
     try:

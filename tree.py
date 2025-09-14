@@ -3,7 +3,6 @@ from config import debug_print, FANOUT_LIMIT, MAX_SEARCH_DEPTH, MAX_SUMMARY_LENG
 from memory import load_json, save_json, get_node_data, save_node_data, create_new_node, update_all_memory
 from ai_func import judgement_similar_multi_AI, summary_AI, topic_generation_AI, clustering_AI, parent_update_AI
 
-# 전역 설정
 SIMILARITY_THRESHOLD = 0.7  # 기존 노드에 추가하는 임계값 (엄격하게)
 EXPLORATION_THRESHOLD = 0.5  # 탐색을 계속하는 임계값 (적당하게)
 
@@ -140,7 +139,8 @@ async def find_best_matching_child(children_ids, conversation_pair):
             # 숫자로 변환 실패 시 기존 방식으로 fallback
             # 이런 경우는 거의 발생하지 않음
             if similarity_results[i].strip().lower() == 'true':
-                similarity_score = 0.8  # True인 경우 중간 점수
+                similarity_score = 0.8 
+                #True인 경우 중간 점수
             else:
                 similarity_score = 0.0
         
@@ -231,8 +231,9 @@ async def add_to_existing_node(node_id, memory_index, conversation_summary):
         if new_topic:
             node_data['topic'] = new_topic
     
-    # 노드 저장
     success = save_node_data(node_id, node_data)
+
+
     if success:
         debug_print(f"기존 노드에 대화 추가 완료: {node_id[:8]}...")
         # 부모 노드들 업데이트
@@ -240,7 +241,6 @@ async def add_to_existing_node(node_id, memory_index, conversation_summary):
     
     return success
 
-# fanout 제한 확인
 def will_exceed_fanout_limit(parent_id):
     """새 노드 추가 시 fanout 제한을 초과하는지 확인"""
     children = get_children_ids(parent_id)
@@ -274,7 +274,7 @@ async def perform_clustering(parent_id, new_memory_index, new_conversation_summa
     """Fanout 제한 초과 시 클러스터링 수행"""
     debug_print(f"클러스터링 시작 (부모: {parent_id[:8] if parent_id != 'ROOT' else 'ROOT'}...)")
     
-    # 1. 현재 부모의 모든 기억 자식 노드 획득
+    # 현재 부모의 모든 기억 자식 노드 획득
     memory_children_ids = get_memory_children_ids(parent_id)
     
     if len(memory_children_ids) < 2:
@@ -282,7 +282,7 @@ async def perform_clustering(parent_id, new_memory_index, new_conversation_summa
         debug_print("클러스터링할 노드가 부족합니다. 새 노드 생성으로 전환")
         return await create_new_memory_node(parent_id, new_memory_index, new_conversation_summary)
     
-    # 2. 클러스터링 대상 선택, 인공지능이 사용할 노드를 반환함.
+    # 클러스터링 대상 선택, 인공지능이 사용할 노드를 반환함.
     selected_node_ids, new_parent_topic = await clustering_AI(
         memory_children_ids, 
         new_conversation_summary, 
@@ -294,7 +294,7 @@ async def perform_clustering(parent_id, new_memory_index, new_conversation_summa
         selected_node_ids = memory_children_ids[:min(2, len(memory_children_ids))]
         new_parent_topic = "관련 주제"
     
-    # 3. 새로운 중간 부모 노드 생성
+    #새로운 중간 부모 노드 생성
     new_parent_id = create_new_node(
         topic=new_parent_topic,
         summary="",  # 나중에 업데이트할 예정ㅇ
@@ -306,7 +306,7 @@ async def perform_clustering(parent_id, new_memory_index, new_conversation_summa
         debug_print("ERROR: 새 부모 노드 생성 실패")
         return None
     
-    # 4. 선택된 노드들을 새 부모 밑으로 이동
+    #선택된 노드들을 새 부모 밑으로 이동
     all_memory_indexes = [new_memory_index]
     combined_summaries = [new_conversation_summary]
     
@@ -329,10 +329,10 @@ async def perform_clustering(parent_id, new_memory_index, new_conversation_summa
                 parent_data['children_ids'].remove(node_id)
                 save_node_data(parent_id, parent_data)
     
-    # 5. 새 기억 노드 생성 (현재 대화용)
+    #새 기억 노드 생성 (현재 대화용)
     new_memory_node_id = await create_new_memory_node(new_parent_id, new_memory_index, new_conversation_summary)
     
-    # 6. 새 부모 노드 업데이트
+    # 새 부모 노드 업데이트
     new_parent_data = get_node_data(new_parent_id)
     if new_parent_data:
         new_parent_data['children_ids'] = selected_node_ids + ([new_memory_node_id] if new_memory_node_id else [])
@@ -359,7 +359,7 @@ async def update_parent_nodes(updated_node_id, new_content_summary):
     if not all_parent_ids:
         return  # ROOT 직속 자식인 경우
     
-    # 1. 요약 이어붙이기 (순차적 처리)
+    # 요약 이어붙이기 (순차적 처리)
     need_compression = []
     
     for parent_id in all_parent_ids:
@@ -378,7 +378,7 @@ async def update_parent_nodes(updated_node_id, new_content_summary):
         
         save_node_data(parent_id, parent_data)
     
-    # 2. 병렬 압축 처리 (필요한 경우)
+    # 병렬 압축 처리 (필요한 경우)
     if need_compression:
         debug_print(f"부모 노드 압축 시작 ({len(need_compression)}개)")
         
@@ -401,19 +401,15 @@ async def save_tree(conversation_pair):
     """새로운 대화를 적절한 위치에 저장"""
     debug_print("대화 저장 프로세스 시작")
     
-    # 1. 대화를 ALL_MEMORY에 추가하고 인덱스 획득
     memory_index = update_all_memory(conversation_pair)
     if memory_index == -1:
         debug_print("ERROR: ALL_MEMORY 업데이트 실패")
         return False
     
-    # 2. 대화 요약 생성
     conversation_summary = summary_AI(conversation_pair, MAX_SUMMARY_LENGTH)
     
-    # 3. 저장 위치 탐색
     target_location = await find_storage_location(conversation_pair)
     
-    # 4. 기존 기억 노드에 추가 vs 새 노드 생성 결정
     if target_location.get('existing_memory_node'):
         # 기존 기억 노드에 추가
         success = await add_to_existing_node(
