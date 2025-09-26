@@ -413,22 +413,19 @@ def debug_print(message, end='\n'):
     timestamp = get_timestamp()
     formatted_message = f"{timestamp} >>> {message}"
     
-    # 화면 출력 (DEBUG가 True일 때만)
     if DEBUG:
         print(formatted_message, end=end)
     
-    # 파일 저장 (DEBUG_TXT가 True일 때는 항상) - 확실한 즉시 저장
     if DEBUG_TXT and debug_log_filename:
         try:
             with open(debug_log_filename, 'a', encoding='utf-8') as f:
                 f.write(formatted_message + end)
                 f.flush()
-                os.fsync(f.fileno())  # OS 레벨 강제 디스크 쓰기
+                os.fsync(f.fileno())
         except Exception as e:
             print(f"디버그 로그 쓰기 오류: {e}")
 
 def debug_log_separator():
-    """디버그 로그에 구분선 추가"""
     if DEBUG_TXT and debug_log_filename:
         separator = "=" * 60 + "\n"
         try:
@@ -440,7 +437,6 @@ def debug_log_separator():
             print(f"디버그 로그 구분선 쓰기 오류: {e}")
 
 def debug_log_close():
-    """디버그 로그 파일 닫기"""
     global debug_log_file, debug_log_filename
     if debug_log_file:
         debug_log_file.close()
@@ -536,7 +532,6 @@ def update_config(**kwargs):
     global SYSTEM_MODE, SEARCH_MODE, UPDATE_TOPIC, GEMINI_MODEL, FANOUT_LIMIT, MAX_SUMMARY_LENGTH
     global DEBUG, DEBUG_TXT, NO_RECORD
     
-    # 전역 변수 업데이트
     if 'SYSTEM_MODE' in kwargs:
         SYSTEM_MODE = kwargs['SYSTEM_MODE']
     if 'SEARCH_MODE' in kwargs:
@@ -552,13 +547,11 @@ def update_config(**kwargs):
     if 'DEBUG' in kwargs:
         old_debug = DEBUG
         DEBUG = kwargs['DEBUG']
-        # DEBUG 상태 변경 시 로그 초기화
         if DEBUG != old_debug and DEBUG_TXT:
             debug_log_init()
     if 'DEBUG_TXT' in kwargs:
         old_debug_txt = DEBUG_TXT
         DEBUG_TXT = kwargs['DEBUG_TXT']
-        # DEBUG_TXT 상태 변경 시 로그 처리
         if DEBUG_TXT != old_debug_txt:
             if DEBUG_TXT:
                 debug_log_init()
@@ -567,7 +560,6 @@ def update_config(**kwargs):
     if 'NO_RECORD' in kwargs:
         NO_RECORD = kwargs['NO_RECORD']
     
-    # config.json 파일 업데이트
     save_config()
     
     if DEBUG:
@@ -630,14 +622,12 @@ def validate_node_structure(node_data):
         if field not in node_data:
             return False
             
-    # 타입 검사
     if not isinstance(node_data['all_parent_ids'], list):
         return False
     if not isinstance(node_data['children_ids'], list):
         return False
         
-    # 기억 노드인 경우 all_memory_indexes 필드 확인
-    if len(node_data['children_ids']) == 0:  # 리프 노드 (기억 노드)
+    if len(node_data['children_ids']) == 0:
         if 'all_memory_indexes' not in node_data:
             return False
         if not isinstance(node_data['all_memory_indexes'], list):
@@ -661,9 +651,7 @@ def get_root_children_ids():
         debug_print(f"ROOT 자식 노드 조회 오류: {e}")
         return []
 
-# 초기 설정 로드
 load_config()
 
-# 디버그 초기화
 if DEBUG_TXT:
     debug_log_init()
